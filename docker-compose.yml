@@ -1,0 +1,47 @@
+services:
+  ops-api:
+    build:
+      context: .
+      args:
+        VITE_API_BASE: http://127.0.0.1:8787
+        VITE_WS_BASE: ws://127.0.0.1:8787
+    command: ['node', 'server/dist/index.js']
+    environment:
+      NODE_ENV: production
+      OPS_HOST: 0.0.0.0
+      OPS_PORT: 8787
+      OPS_DATA_DIR: /data
+      OPS_CORS_ORIGIN: http://127.0.0.1:3000
+      OPS_ALLOW_INSECURE_CORS_ORIGIN: 'true'
+      OPS_ADMIN_TOKEN: ${OPS_ADMIN_TOKEN:?set OPS_ADMIN_TOKEN}
+      OPS_AGENT_WORKER_TOKEN: ${OPS_AGENT_WORKER_TOKEN:?set OPS_AGENT_WORKER_TOKEN}
+      OPS_SECRET_KEY: ${OPS_SECRET_KEY:?set OPS_SECRET_KEY}
+      OPS_RATE_LIMIT_MAX: ${OPS_RATE_LIMIT_MAX:-600}
+      OPS_RATE_LIMIT_WINDOW: ${OPS_RATE_LIMIT_WINDOW:-1 minute}
+      OPS_TRUST_PROXY: ${OPS_TRUST_PROXY:-false}
+    ports:
+      - '8787:8787'
+    volumes:
+      - ops-data:/data
+    restart: unless-stopped
+
+  ops-web:
+    build:
+      context: .
+      args:
+        VITE_API_BASE: http://127.0.0.1:8787
+        VITE_WS_BASE: ws://127.0.0.1:8787
+    command: ['node', 'build']
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOST: 0.0.0.0
+      ORIGIN: http://127.0.0.1:3000
+    ports:
+      - '3000:3000'
+    depends_on:
+      - ops-api
+    restart: unless-stopped
+
+volumes:
+  ops-data:
