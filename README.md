@@ -58,6 +58,8 @@ OPS_AUTH_MAX_FAILED_LOGINS="5"
 OPS_AUTH_LOCKOUT_MS="900000"
 OPS_AGENT_WORKER_ID="pi-ops-01"
 OPS_AGENT_WORKER_EXECUTE="false"
+OPS_AGENT_WORKER_ALLOW_COMMANDS="hostnamectl,uptime,systemctl,df"
+OPS_AGENT_WORKER_CWD="/"
 OPS_AGENT_WORKER_POLL_MS="5000"
 OPS_AGENT_WORKER_COMMAND_TIMEOUT_MS="60000"
 OPS_AGENT_WORKER_MAX_OUTPUT_BYTES="200000"
@@ -103,7 +105,7 @@ OPS_AGENT_WORKER_ID="pi-local" \
 npm run agent:worker
 ```
 
-Set `OPS_AGENT_WORKER_EXECUTE=true` only on the controlled machine that should run approved commands. The worker enforces `OPS_AGENT_WORKER_COMMAND_TIMEOUT_MS` and truncates stdout/stderr at `OPS_AGENT_WORKER_MAX_OUTPUT_BYTES`.
+Set `OPS_AGENT_WORKER_EXECUTE=true` only on the controlled machine that should run approved commands. Real execution also requires `OPS_AGENT_WORKER_ALLOW_COMMANDS`, a comma-separated executable allowlist such as `hostnamectl,uptime,systemctl,df`. Commands that use shell chaining, pipes, redirection, command substitution or control characters are rejected before execution. Set `OPS_AGENT_WORKER_CWD` to pin the worker process working directory if needed. The worker enforces `OPS_AGENT_WORKER_COMMAND_TIMEOUT_MS` and truncates stdout/stderr at `OPS_AGENT_WORKER_MAX_OUTPUT_BYTES`.
 
 The worker calls these endpoints with `Authorization: Bearer $OPS_AGENT_WORKER_TOKEN`:
 
@@ -192,7 +194,7 @@ Persist the volume and include both `*.json` and `*.json.bak` files in host-leve
 - SSH WebSocket sessions are capped by `OPS_SSH_MAX_SESSIONS`, use short-lived tickets, are visible in the terminal workspace, can be force-closed with exact session-id confirmation, and close after `OPS_SSH_IDLE_TIMEOUT_MS` without activity.
 - Pin SSH host keys in each SSH preset. You can get the OpenSSH SHA256 fingerprint with `ssh-keyscan host.example.com | ssh-keygen -lf -`.
 - Run the Pi agent worker as a separate constrained process.
-- Keep command execution approval-gated; only approved jobs appear in the worker API.
+- Keep command execution approval-gated; only approved jobs appear in the worker API. The browser never receives the worker token, and the worker still applies its own command allowlist before running anything.
 - Destructive operations require explicit confirmations at the API boundary:
   MySQL mutation SQL requires `RUN MUTATION`, MySQL row delete requires the table name, S3 delete requires the exact object key, expense delete requires the entry id, and connection preset delete requires the preset id.
 - MySQL row update/delete require the submitted row key to exactly match a primary key or unique index. The API pre-checks that the key matches exactly one row before mutating.

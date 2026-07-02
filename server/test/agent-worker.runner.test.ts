@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { AgentJob } from '../../src/lib/shared/ops-types';
-import { createOutputCollector, runAgentJob, runCommand } from '../src/agent-worker/runner';
+import {
+	createOutputCollector,
+	runAgentJob,
+	runCommand,
+	validateCommandPolicy
+} from '../src/agent-worker/runner';
 
 function jobWithCommand(command: string): AgentJob {
 	return {
@@ -35,7 +40,8 @@ test('agent worker executes approved commands and captures stdout', async () => 
 	const result = await runAgentJob(jobWithCommand('node -e "console.log(123)"'), {
 		execute: true,
 		commandTimeoutMs: 5000,
-		maxOutputBytes: 1000
+		maxOutputBytes: 1000,
+		policy: { allowedCommands: ['node'] }
 	});
 
 	assert.equal(result.success, true);
@@ -47,7 +53,8 @@ test('agent worker marks non-zero command results as failed', async () => {
 	const result = await runAgentJob(jobWithCommand('node -e "process.exit(7)"'), {
 		execute: true,
 		commandTimeoutMs: 5000,
-		maxOutputBytes: 1000
+		maxOutputBytes: 1000,
+		policy: { allowedCommands: ['node'] }
 	});
 
 	assert.equal(result.success, false);
@@ -58,6 +65,36 @@ test('agent worker truncates command output', async () => {
 	const collector = createOutputCollector(5);
 	collector.append(Buffer.from('1234567890'));
 	assert.equal(collector.value(), '12345\n[output truncated at 5 bytes]');
+});
+
+test('agent worker rejects execution when command policy fails', async () => {
+	const result = await runAgentJob(jobWithCommand('node -e "console.log(123)"'), {
+		execute: true,
+		commandTimeoutMs: 5000,
+		maxOutputBytes: 1000,
+		policy: { allowedCommands: [] }
+	});
+
+	assert.equal(result.success, false);
+	assert.match(result.result, /worker policy/);
+	assert.equal(result.commandResults[0].exitCode, null);
+	assert.match(result.commandResults[0].stderr ?? '', /allowlist/);
+});
+
+test('agent worker command policy blocks unapproved executables and shell chaining', () => {
+	assert.equal(validateCommandPolicy('node -v', { allowedCommands: ['node'] }), '');
+	assert.match(
+		validateCommandPolicy('powershell Get-Process', { allowedCommands: ['node'] }),
+		/not allowed/
+	);
+	assert.match(
+		validateCommandPolicy('node -v && whoami', { allowedCommands: ['node'] }),
+		/shell chaining/
+	);
+	assert.match(
+		validateCommandPolicy('node -e "console.log(1)" > out.txt', { allowedCommands: ['node'] }),
+		/shell chaining/
+	);
 });
 
 test('agent worker times out long-running commands', async () => {

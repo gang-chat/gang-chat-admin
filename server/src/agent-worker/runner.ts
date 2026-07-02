@@ -6,6 +6,12 @@ export type AgentWorkerRunOptions = {
 	execute: boolean;
 	commandTimeoutMs: number;
 	maxOutputBytes: number;
+	policy?: AgentWorkerCommandPolicy;
+};
+
+export type AgentWorkerCommandPolicy = {
+	allowedCommands: string[];
+	workingDirectory?: string;
 };
 
 export type AgentWorkerRunResult = {
@@ -33,10 +39,25 @@ export async function runAgentJob(
 
 	const commandResults: AgentCommandResult[] = [];
 	for (const command of job.commands) {
+		const policyError = validateCommandPolicy(command.command, options.policy);
+		if (policyError) {
+			commandResults.push({
+				label: command.label,
+				command: command.command,
+				exitCode: null,
+				stderr: policyError
+			});
+			return {
+				success: false,
+				result: `Command rejected by worker policy: ${command.label}`,
+				commandResults
+			};
+		}
 		const result = await runCommand(command.command, {
 			label: command.label,
 			timeoutMs: options.commandTimeoutMs,
-			maxOutputBytes: options.maxOutputBytes
+			maxOutputBytes: options.maxOutputBytes,
+			cwd: options.policy?.workingDirectory
 		});
 		commandResults.push(result);
 		if (result.exitCode !== 0) {
@@ -57,7 +78,7 @@ export async function runAgentJob(
 
 export async function runCommand(
 	command: string,
-	options: { label?: string; timeoutMs: number; maxOutputBytes: number }
+	options: { label?: string; timeoutMs: number; maxOutputBytes: number; cwd?: string }
 ): Promise<AgentCommandResult> {
 	const started = Date.now();
 	const startedAt = new Date(started).toISOString();
@@ -67,6 +88,7 @@ export async function runCommand(
 	const child = spawn(command, {
 		shell: true,
 		windowsHide: true,
+		cwd: options.cwd,
 		stdio: ['ignore', 'pipe', 'pipe']
 	});
 
@@ -99,6 +121,46 @@ export async function runCommand(
 		completedAt: new Date().toISOString(),
 		durationMs: Date.now() - started
 	};
+}
+
+export function validateCommandPolicy(command: string, policy?: AgentWorkerCommandPolicy) {
+	const trimmed = command.trim();
+	if (!trimmed) return 'Command is empty';
+	if (trimmed.length > 20_000) return 'Command is too long';
+	if (hasControlCharacter(trimmed)) return 'Command contains control characters';
+	if (/[;&|<>`]/.test(trimmed) || /\$\s*\(/.test(trimmed)) {
+		return 'Command uses shell chaining, redirection or command substitution';
+	}
+
+	const executable = firstToken(trimmed).toLowerCase();
+	const allowedCommands = policy?.allowedCommands ?? [];
+	if (allowedCommands.length === 0) {
+		return 'Worker execution allowlist is empty';
+	}
+	if (!allowedCommands.map((item) => item.toLowerCase()).includes(executable)) {
+		return `Executable is not allowed by this worker: ${executable}`;
+	}
+	return '';
+}
+
+function firstToken(command: string) {
+	const trimmed = command.trim();
+	if (trimmed.startsWith('"')) {
+		const end = trimmed.indexOf('"', 1);
+		if (end > 1) return trimmed.slice(1, end);
+	}
+	if (trimmed.startsWith("'")) {
+		const end = trimmed.indexOf("'", 1);
+		if (end > 1) return trimmed.slice(1, end);
+	}
+	return trimmed.split(/\s+/)[0] ?? '';
+}
+
+function hasControlCharacter(value: string) {
+	return Array.from(value).some((char) => {
+		const code = char.charCodeAt(0);
+		return code < 32 || code === 127;
+	});
 }
 
 export function createOutputCollector(maxBytes: number) {

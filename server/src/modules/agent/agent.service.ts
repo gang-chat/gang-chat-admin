@@ -54,17 +54,22 @@ export class AgentService {
 			commands: [
 				{
 					label: 'Read host identity',
-					command: 'hostnamectl && uptime',
+					command: 'hostnamectl',
 					requiresApproval: false
 				},
 				{
-					label: 'Check recent service failures',
+					label: 'Read uptime and load',
+					command: 'uptime',
+					requiresApproval: false
+				},
+				{
+					label: 'Check failed services',
 					command: 'systemctl --failed --no-pager',
 					requiresApproval: false
 				},
 				{
 					label: 'Inspect disk pressure',
-					command: 'df -h && du -xh /var/log | sort -h | tail -20',
+					command: 'df -h',
 					requiresApproval: false
 				}
 			],

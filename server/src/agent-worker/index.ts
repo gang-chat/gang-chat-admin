@@ -28,7 +28,11 @@ async function processNextJob() {
 		const outcome = await runAgentJob(started, {
 			execute: env.execute,
 			commandTimeoutMs: env.commandTimeoutMs,
-			maxOutputBytes: env.maxOutputBytes
+			maxOutputBytes: env.maxOutputBytes,
+			policy: {
+				allowedCommands: env.allowedCommands,
+				workingDirectory: env.workingDirectory
+			}
 		});
 		if (outcome.success) {
 			await client.completeJob(started.id, {
@@ -61,7 +65,7 @@ async function processNextJob() {
 
 async function main() {
 	console.info(
-		`agent worker ${env.workerId} polling ${env.apiBase}; execute=${env.execute ? 'true' : 'false'}`
+		`agent worker ${env.workerId} polling ${env.apiBase}; execute=${env.execute ? 'true' : 'false'}; allowed=${env.allowedCommands.join(',') || 'none'}`
 	);
 
 	do {
