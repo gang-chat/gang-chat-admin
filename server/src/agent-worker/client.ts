@@ -10,6 +10,21 @@ export class AgentWorkerClient {
 		return this.request<AgentJob[]>(`/api/agent/worker/jobs?limit=${limit}`);
 	}
 
+	async heartbeat(body: {
+		workerId: string;
+		apiBase?: string;
+		hostname?: string;
+		version?: string;
+		execute: boolean;
+		allowedCommands: string[];
+		currentJobId?: string;
+	}) {
+		return this.request<{ id: string; lastSeenAt: string }>('/api/agent/worker/heartbeat', {
+			method: 'POST',
+			body: JSON.stringify(body)
+		});
+	}
+
 	async startJob(id: string, workerId: string) {
 		return this.request<AgentJob>(`/api/agent/worker/jobs/${encodeURIComponent(id)}/start`, {
 			method: 'POST',

@@ -3,13 +3,15 @@ import type {
 	AgentCommand,
 	AgentCommandResult,
 	AgentJob,
-	AgentJobStatus
+	AgentJobStatus,
+	AgentWorkerStatus
 } from '../../../../src/lib/shared/ops-types';
 import { HttpError } from '../../core/http';
 import { JsonStore, storePath } from '../../store/json-store';
 
 type AgentState = {
 	jobs: AgentJob[];
+	workers?: AgentWorkerStatus[];
 };
 
 export class AgentService {
@@ -22,6 +24,11 @@ export class AgentService {
 	async list(status?: AgentJobStatus) {
 		const state = await this.store.read();
 		return state.jobs.filter((job) => !status || job.status === status);
+	}
+
+	async listWorkers() {
+		const state = await this.store.read();
+		return [...(state.workers ?? [])].sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
 	}
 
 	async listWorkerQueue(limit: number) {
@@ -89,6 +96,40 @@ export class AgentService {
 
 	async reject(id: string, operatorNote?: string) {
 		return this.transition(id, 'rejected', operatorNote);
+	}
+
+	async heartbeat(input: {
+		workerId: string;
+		apiBase?: string;
+		hostname?: string;
+		version?: string;
+		execute: boolean;
+		allowedCommands: string[];
+		currentJobId?: string;
+	}) {
+		let updated: AgentWorkerStatus | undefined;
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			state.workers ??= [];
+			const existing = state.workers.find((worker) => worker.id === input.workerId);
+			const next: AgentWorkerStatus = {
+				id: input.workerId,
+				lastSeenAt: now,
+				apiBase: input.apiBase,
+				hostname: input.hostname,
+				version: input.version,
+				execute: input.execute,
+				allowedCommands: input.allowedCommands,
+				currentJobId: input.currentJobId
+			};
+			if (existing) Object.assign(existing, next);
+			else state.workers.unshift(next);
+			state.workers = state.workers
+				.sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
+				.slice(0, 100);
+			updated = existing ?? next;
+		});
+		return updated!;
 	}
 
 	private async transition(

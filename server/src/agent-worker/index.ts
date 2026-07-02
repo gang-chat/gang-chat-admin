@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { AgentWorkerClient } from './client';
 import { loadAgentWorkerEnv } from './config';
 import { runAgentJob } from './runner';
@@ -18,6 +19,7 @@ function sleep(ms: number) {
 }
 
 async function processNextJob() {
+	await heartbeat();
 	const jobs = await client.listJobs(1);
 	const job = jobs[0];
 	if (!job) return false;
@@ -25,6 +27,7 @@ async function processNextJob() {
 	let started = job;
 	try {
 		started = await client.startJob(job.id, env.workerId);
+		await heartbeat(started.id);
 		const outcome = await runAgentJob(started, {
 			execute: env.execute,
 			commandTimeoutMs: env.commandTimeoutMs,
@@ -49,6 +52,7 @@ async function processNextJob() {
 			});
 			console.error(`failed agent job ${started.id}: ${outcome.result}`);
 		}
+		await heartbeat();
 		return true;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
@@ -59,8 +63,21 @@ async function processNextJob() {
 				error: message
 			});
 		}
+		await heartbeat();
 		return true;
 	}
+}
+
+async function heartbeat(currentJobId?: string) {
+	await client.heartbeat({
+		workerId: env.workerId,
+		apiBase: env.apiBase,
+		hostname: os.hostname(),
+		version: process.env.npm_package_version,
+		execute: env.execute,
+		allowedCommands: env.allowedCommands,
+		currentJobId
+	});
 }
 
 async function main() {

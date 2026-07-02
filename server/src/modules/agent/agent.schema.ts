@@ -24,6 +24,16 @@ export const agentWorkerJobsQuerySchema = z.object({
 	limit: z.coerce.number().int().min(1).max(50).default(10)
 });
 
+export const agentWorkerHeartbeatBodySchema = z.object({
+	workerId: z.string().trim().min(1).max(120),
+	apiBase: z.string().trim().max(500).optional(),
+	hostname: z.string().trim().max(255).optional(),
+	version: z.string().trim().max(120).optional(),
+	execute: z.boolean(),
+	allowedCommands: z.array(z.string().trim().min(1).max(200)).max(100).default([]),
+	currentJobId: z.string().trim().max(120).optional()
+});
+
 export const agentWorkerStartBodySchema = z.object({
 	workerId: z.string().trim().min(1).max(120)
 });

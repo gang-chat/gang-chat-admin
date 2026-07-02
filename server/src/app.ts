@@ -98,7 +98,7 @@ export async function buildApp(env: ServerEnv) {
 		if (request.url.startsWith('/api/auth/login')) {
 			return;
 		}
-		if (request.url.startsWith('/api/agent/worker')) return;
+		if (request.url.startsWith('/api/agent/worker/')) return;
 		const identity = await requireAuth(env, request, (token) => auth.validateToken(token));
 		request.opsIdentity = identity;
 		enterRequestContext(actorFromRequest(request, identity.actor), identity);

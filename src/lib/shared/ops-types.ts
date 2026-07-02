@@ -249,6 +249,17 @@ export type AgentJobStatus = 'suggested' | 'approved' | 'rejected';
 
 export type AgentExecutionStatus = 'queued' | 'running' | 'completed' | 'failed';
 
+export type AgentWorkerStatus = {
+	id: string;
+	lastSeenAt: string;
+	apiBase?: string;
+	hostname?: string;
+	version?: string;
+	execute: boolean;
+	allowedCommands: string[];
+	currentJobId?: string;
+};
+
 export type AgentCommandResult = {
 	label?: string;
 	command: string;

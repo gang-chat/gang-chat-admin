@@ -1115,6 +1115,33 @@ test('agent worker API uses separate auth and records execution lifecycle', asyn
 		assert.equal(workerDeniedForAdmin.statusCode, 401);
 		assert.equal(adminDeniedForWorker.statusCode, 401);
 
+		const heartbeat = await app.inject({
+			method: 'POST',
+			url: '/api/agent/worker/heartbeat',
+			headers: { authorization: `Bearer ${agentWorkerToken}` },
+			payload: {
+				workerId: 'pi-worker-01',
+				apiBase: 'http://127.0.0.1:8787',
+				hostname: 'pi-ops',
+				version: '0.0.1',
+				execute: false,
+				allowedCommands: ['hostnamectl', 'uptime']
+			}
+		});
+		assert.equal(heartbeat.statusCode, 200);
+		assert.equal(heartbeat.json().data.id, 'pi-worker-01');
+
+		const workers = await app.inject({
+			method: 'GET',
+			url: '/api/agent/workers',
+			headers: { authorization: `Bearer ${token}` }
+		});
+		assert.equal(workers.statusCode, 200);
+		assert.equal(workers.json().data.length, 1);
+		assert.equal(workers.json().data[0].id, 'pi-worker-01');
+		assert.equal(workers.json().data[0].hostname, 'pi-ops');
+		assert.deepEqual(workers.json().data[0].allowedCommands, ['hostnamectl', 'uptime']);
+
 		const created = await app.inject({
 			method: 'POST',
 			url: '/api/agent/suggest',

@@ -111,12 +111,13 @@ The worker calls these endpoints with `Authorization: Bearer $OPS_AGENT_WORKER_T
 
 ```sh
 GET  /api/agent/worker/jobs?limit=10
+POST /api/agent/worker/heartbeat  # worker status and command policy heartbeat
 POST /api/agent/worker/jobs/:id/start     # { "workerId": "pi-worker-01" }
 POST /api/agent/worker/jobs/:id/complete  # { "workerId": "pi-worker-01", "result": "...", "commandResults": [] }
 POST /api/agent/worker/jobs/:id/fail      # { "workerId": "pi-worker-01", "error": "..." }
 ```
 
-Only operator-approved jobs are exposed to the worker queue. Operators can edit the final command list before approval; the worker receives the approved command list, not a hidden browser-side draft. The main API stores execution state and audit events, but it does not execute shell commands itself.
+Only operator-approved jobs are exposed to the worker queue. Operators can edit the final command list before approval; the worker receives the approved command list, not a hidden browser-side draft. Workers send heartbeat records with hostname, execution mode and command allowlist so the Agent panel can show whether the controlled process is online. The main API stores execution state and audit events, but it does not execute shell commands itself.
 
 ## Backup And Restore
 

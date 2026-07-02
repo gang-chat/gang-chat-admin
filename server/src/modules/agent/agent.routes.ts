@@ -10,6 +10,7 @@ import {
 	agentSuggestBodySchema,
 	agentWorkerCompleteBodySchema,
 	agentWorkerFailBodySchema,
+	agentWorkerHeartbeatBodySchema,
 	agentWorkerJobsQuerySchema,
 	agentWorkerStartBodySchema
 } from './agent.schema';
@@ -22,6 +23,11 @@ export async function registerAgentRoutes(
 	app.get('/api/agent/jobs', async (request) => {
 		const query = parseInput(agentJobsQuerySchema, request.query);
 		return ok(await deps.agent.list(query.status));
+	});
+
+	app.get('/api/agent/workers', async (request) => {
+		requireRole(request, 'operator');
+		return ok(await deps.agent.listWorkers());
 	});
 
 	app.post('/api/agent/suggest', async (request) => {
@@ -69,6 +75,12 @@ export async function registerAgentRoutes(
 		requireAgentWorkerAuth(deps.env, request);
 		const query = parseInput(agentWorkerJobsQuerySchema, request.query);
 		return ok(await deps.agent.listWorkerQueue(query.limit));
+	});
+
+	app.post('/api/agent/worker/heartbeat', async (request) => {
+		requireAgentWorkerAuth(deps.env, request);
+		const body = parseInput(agentWorkerHeartbeatBodySchema, request.body);
+		return ok(await deps.agent.heartbeat(body));
 	});
 
 	app.post('/api/agent/worker/jobs/:id/start', async (request) => {

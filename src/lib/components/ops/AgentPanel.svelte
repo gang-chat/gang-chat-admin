@@ -2,7 +2,13 @@
 	import { Bot, Check, Plus, RefreshCw, Trash2, X } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import type { ApiClient } from '$lib/api/client';
-	import type { AgentCommand, AgentJob, AgentJobStatus, AuthRole } from '$lib/shared/ops-types';
+	import type {
+		AgentCommand,
+		AgentJob,
+		AgentJobStatus,
+		AgentWorkerStatus,
+		AuthRole
+	} from '$lib/shared/ops-types';
 	import type { RunTask } from './types';
 
 	let {
@@ -22,6 +28,7 @@
 	let goal = $state('');
 	let context = $state('');
 	let jobs = $state<AgentJob[]>([]);
+	let workers = $state<AgentWorkerStatus[]>([]);
 	let selectedJobId = $state('');
 	let commandDraftJobId = $state('');
 	let commandDrafts = $state<AgentCommand[]>([]);
@@ -42,6 +49,7 @@
 
 	onMount(() => {
 		void loadJobs();
+		void loadWorkers();
 	});
 
 	async function suggestAgent() {
@@ -51,6 +59,7 @@
 			goal = '';
 			context = '';
 			await loadJobs();
+			await loadWorkers();
 			await onAuditRefresh();
 		}, 'Agent job created');
 	}
@@ -71,6 +80,7 @@
 			selectedJobId = job.id;
 			operatorNote = '';
 			await loadJobs();
+			await loadWorkers();
 			await onAuditRefresh();
 		}, 'Agent job approved');
 	}
@@ -82,8 +92,19 @@
 			selectedJobId = job.id;
 			operatorNote = '';
 			await loadJobs();
+			await loadWorkers();
 			await onAuditRefresh();
 		}, 'Agent job rejected');
+	}
+
+	async function loadWorkers() {
+		if (!canOperate) {
+			workers = [];
+			return;
+		}
+		await run(async () => {
+			workers = await api.agentWorkers();
+		});
 	}
 
 	function selectJob(job: AgentJob) {
@@ -118,6 +139,15 @@
 		}
 		return '';
 	}
+
+	function workerFresh(worker: AgentWorkerStatus) {
+		return Date.now() - Date.parse(worker.lastSeenAt) < 30_000;
+	}
+
+	function relativeSeconds(value: string) {
+		const seconds = Math.max(0, Math.round((Date.now() - Date.parse(value)) / 1000));
+		return seconds < 60 ? `${seconds}s ago` : `${Math.round(seconds / 60)}m ago`;
+	}
 </script>
 
 <section class="workspace">
@@ -144,7 +174,14 @@
 						<option value="approved">Approved</option>
 						<option value="rejected">Rejected</option>
 					</select>
-					<button class="icon-button" title="Refresh jobs" onclick={loadJobs}>
+					<button
+						class="icon-button"
+						title="Refresh jobs"
+						onclick={() => {
+							void loadJobs();
+							void loadWorkers();
+						}}
+					>
 						<RefreshCw class="size-4" />
 					</button>
 				</div>
@@ -163,6 +200,39 @@
 							class="rounded border border-dashed border-zinc-300 px-3 py-4 text-center text-xs text-zinc-500"
 						>
 							No agent jobs match the filter.
+						</div>
+					{/if}
+				</div>
+			</div>
+
+			<div class="mt-6 border-t border-zinc-200 pt-4">
+				<div class="panel-title">Workers</div>
+				<div class="space-y-1">
+					{#each workers as worker (worker.id)}
+						<div class="rounded border border-zinc-200 bg-white px-2 py-2 text-xs">
+							<div class="flex items-center justify-between gap-2">
+								<div class="font-medium">{worker.id}</div>
+								<span class={workerFresh(worker) ? 'text-emerald-700' : 'text-amber-700'}>
+									{workerFresh(worker) ? 'online' : 'stale'}
+								</span>
+							</div>
+							<div class="mt-1 text-zinc-500">
+								{worker.hostname ?? 'unknown host'} · {relativeSeconds(worker.lastSeenAt)}
+							</div>
+							<div class="mt-1 truncate text-zinc-500">
+								{worker.execute ? 'execute' : 'dry-run'} ·
+								{worker.allowedCommands.length ? worker.allowedCommands.join(', ') : 'no allowlist'}
+							</div>
+							{#if worker.currentJobId}
+								<div class="mt-1 truncate text-cyan-700">job: {worker.currentJobId}</div>
+							{/if}
+						</div>
+					{/each}
+					{#if canOperate && workers.length === 0}
+						<div
+							class="rounded border border-dashed border-zinc-300 px-3 py-4 text-center text-xs text-zinc-500"
+						>
+							No workers have checked in.
 						</div>
 					{/if}
 				</div>
