@@ -78,6 +78,30 @@ type RawConfig = {
 	connections?: Partial<ConfigConnections>;
 };
 
+const DEFAULT_CONFIG = {
+	mode: 'development',
+	host: '127.0.0.1',
+	port: 8787,
+	corsOrigin: ['http://localhost:8787', 'http://127.0.0.1:8787'],
+	dataDir: './.ops-data',
+	logLevel: 'info',
+	bodyLimitBytes: 10 * 1024 * 1024,
+	uploadLimitBytes: 100 * 1024 * 1024,
+	rateLimitMax: 600,
+	rateLimitWindow: '1 minute',
+	trustProxy: false,
+	sshMaxSessions: 8,
+	sshIdleTimeoutMs: 10 * 60 * 1000,
+	sshReadyTimeoutMs: 20 * 1000,
+	sshKeepaliveIntervalMs: 15 * 1000,
+	sshTicketTtlMs: 30 * 1000,
+	sshRequireHostKeyVerification: false,
+	sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
+	sessionIdleTimeoutMs: 24 * 60 * 60 * 1000,
+	authMaxFailedLogins: 8,
+	authLockoutMs: 15 * 60 * 1000
+};
+
 export async function loadConfig(): Promise<ServerConfig> {
 	const configPath = path.resolve(getConfigPath());
 	let raw: RawConfig;
@@ -90,8 +114,8 @@ export async function loadConfig(): Promise<ServerConfig> {
 		throw error;
 	}
 
-	const nodeEnv = requiredString(raw.mode, 'mode');
-	const dataDir = path.resolve(path.dirname(configPath), requiredString(raw.dataDir, 'dataDir'));
+	const nodeEnv = raw.mode?.trim() || DEFAULT_CONFIG.mode;
+	const dataDir = path.resolve(path.dirname(configPath), raw.dataDir?.trim() || DEFAULT_CONFIG.dataDir);
 	await mkdir(dataDir, { recursive: true });
 
 	const adminUsername = requiredString(raw.adminUsername, 'adminUsername');
@@ -101,38 +125,57 @@ export async function loadConfig(): Promise<ServerConfig> {
 		throw new Error(`adminPassword violates password policy: ${issues.join('; ')}`);
 	}
 
-	const corsOrigin = raw.corsOrigin ?? [];
+	const corsOrigin = raw.corsOrigin ?? DEFAULT_CONFIG.corsOrigin;
 	validateCorsOrigins(corsOrigin, nodeEnv);
 
 	return {
-		host: requiredString(raw.host, 'host'),
-		port: positiveNumber(raw.port, 'port'),
+		host: raw.host?.trim() || DEFAULT_CONFIG.host,
+		port: positiveNumber(raw.port ?? DEFAULT_CONFIG.port, 'port'),
 		corsOrigin,
 		dataDir,
 		agentWorkerToken: requiredString(raw.agentWorkerToken, 'agentWorkerToken'),
 		secretKey: loadSecretKey(requiredString(raw.secretKey, 'secretKey')),
 		nodeEnv,
-		logLevel: raw.logLevel?.trim() || 'info',
-		bodyLimitBytes: positiveNumber(raw.bodyLimitBytes, 'bodyLimitBytes'),
-		uploadLimitBytes: positiveNumber(raw.uploadLimitBytes, 'uploadLimitBytes'),
-		rateLimitMax: positiveNumber(raw.rateLimitMax, 'rateLimitMax'),
-		rateLimitWindow: requiredString(raw.rateLimitWindow, 'rateLimitWindow'),
-		trustProxy: requiredBoolean(raw.trustProxy, 'trustProxy'),
-		sshMaxSessions: positiveNumber(raw.sshMaxSessions, 'sshMaxSessions'),
-		sshIdleTimeoutMs: positiveNumber(raw.sshIdleTimeoutMs, 'sshIdleTimeoutMs'),
-		sshReadyTimeoutMs: positiveNumber(raw.sshReadyTimeoutMs, 'sshReadyTimeoutMs'),
-		sshKeepaliveIntervalMs: positiveNumber(raw.sshKeepaliveIntervalMs, 'sshKeepaliveIntervalMs'),
-		sshTicketTtlMs: positiveNumber(raw.sshTicketTtlMs, 'sshTicketTtlMs'),
-		sshRequireHostKeyVerification: requiredBoolean(
-			raw.sshRequireHostKeyVerification,
-			'sshRequireHostKeyVerification'
+		logLevel: raw.logLevel?.trim() || DEFAULT_CONFIG.logLevel,
+		bodyLimitBytes: positiveNumber(raw.bodyLimitBytes ?? DEFAULT_CONFIG.bodyLimitBytes, 'bodyLimitBytes'),
+		uploadLimitBytes: positiveNumber(
+			raw.uploadLimitBytes ?? DEFAULT_CONFIG.uploadLimitBytes,
+			'uploadLimitBytes'
 		),
-		sessionTtlMs: positiveNumber(raw.sessionTtlMs, 'sessionTtlMs'),
-		sessionIdleTimeoutMs: positiveNumber(raw.sessionIdleTimeoutMs, 'sessionIdleTimeoutMs'),
+		rateLimitMax: positiveNumber(raw.rateLimitMax ?? DEFAULT_CONFIG.rateLimitMax, 'rateLimitMax'),
+		rateLimitWindow: raw.rateLimitWindow?.trim() || DEFAULT_CONFIG.rateLimitWindow,
+		trustProxy: raw.trustProxy ?? DEFAULT_CONFIG.trustProxy,
+		sshMaxSessions: positiveNumber(raw.sshMaxSessions ?? DEFAULT_CONFIG.sshMaxSessions, 'sshMaxSessions'),
+		sshIdleTimeoutMs: positiveNumber(
+			raw.sshIdleTimeoutMs ?? DEFAULT_CONFIG.sshIdleTimeoutMs,
+			'sshIdleTimeoutMs'
+		),
+		sshReadyTimeoutMs: positiveNumber(
+			raw.sshReadyTimeoutMs ?? DEFAULT_CONFIG.sshReadyTimeoutMs,
+			'sshReadyTimeoutMs'
+		),
+		sshKeepaliveIntervalMs: positiveNumber(
+			raw.sshKeepaliveIntervalMs ?? DEFAULT_CONFIG.sshKeepaliveIntervalMs,
+			'sshKeepaliveIntervalMs'
+		),
+		sshTicketTtlMs: positiveNumber(
+			raw.sshTicketTtlMs ?? DEFAULT_CONFIG.sshTicketTtlMs,
+			'sshTicketTtlMs'
+		),
+		sshRequireHostKeyVerification:
+			raw.sshRequireHostKeyVerification ?? DEFAULT_CONFIG.sshRequireHostKeyVerification,
+		sessionTtlMs: positiveNumber(raw.sessionTtlMs ?? DEFAULT_CONFIG.sessionTtlMs, 'sessionTtlMs'),
+		sessionIdleTimeoutMs: positiveNumber(
+			raw.sessionIdleTimeoutMs ?? DEFAULT_CONFIG.sessionIdleTimeoutMs,
+			'sessionIdleTimeoutMs'
+		),
 		bootstrapAdminUser: adminUsername,
 		bootstrapAdminPassword: adminPassword,
-		authMaxFailedLogins: positiveNumber(raw.authMaxFailedLogins, 'authMaxFailedLogins'),
-		authLockoutMs: positiveNumber(raw.authLockoutMs, 'authLockoutMs'),
+		authMaxFailedLogins: positiveNumber(
+			raw.authMaxFailedLogins ?? DEFAULT_CONFIG.authMaxFailedLogins,
+			'authMaxFailedLogins'
+		),
+		authLockoutMs: positiveNumber(raw.authLockoutMs ?? DEFAULT_CONFIG.authLockoutMs, 'authLockoutMs'),
 		aiAdminWorker: normalizeAiAdminWorker(raw.aiAdminWorker),
 		connections: normalizeConnections(raw.connections)
 	};

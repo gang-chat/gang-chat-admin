@@ -26,6 +26,27 @@ test('loadConfig reads explicit config file', async () => {
 	}
 });
 
+test('loadConfig applies defaults for operational settings', async () => {
+	const dir = await mkdtemp(path.join(os.tmpdir(), 'gang-ops-config-'));
+	try {
+		const configPath = path.join(dir, 'config.json');
+		await writeFile(configPath, JSON.stringify(minimalConfig(), null, 2), 'utf8');
+		await withArgv(['node', 'test', '--config', configPath], async () => {
+			const config = await loadConfig();
+			assert.equal(config.nodeEnv, 'development');
+			assert.equal(config.host, '127.0.0.1');
+			assert.equal(config.port, 8787);
+			assert.equal(config.dataDir, path.join(dir, '.ops-data'));
+			assert.equal(config.rateLimitMax, 600);
+			assert.equal(config.connections.mysql, null);
+			assert.equal(config.connections.s3, null);
+			assert.deepEqual(config.connections.ssh, []);
+		});
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test('loadConfig rejects missing admin password', async () => {
 	const dir = await mkdtemp(path.join(os.tmpdir(), 'gang-ops-config-'));
 	try {
@@ -103,5 +124,19 @@ function baseConfig() {
 			model: 'ops-model'
 		},
 		connections: { mysql: null, s3: null, ssh: [] }
+	};
+}
+
+function minimalConfig() {
+	return {
+		agentWorkerToken: 'test-agent-worker-token',
+		secretKey: '12345678901234567890123456789012',
+		adminUsername: 'admin',
+		adminPassword: 'test-admin-password',
+		aiAdminWorker: {
+			baseUrl: 'https://llm.example.com/v1/',
+			apiKey: 'test-ai-key',
+			model: 'ops-model'
+		}
 	};
 }
