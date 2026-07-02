@@ -4,21 +4,37 @@ import type {
 	AgentCommandResult,
 	AgentJob,
 	AgentJobStatus,
+	AgentOpsRun,
+	AgentOpsSession,
+	AgentWorkerTerminalStatus,
 	AgentWorkerStatus
 } from '../../../../src/lib/shared/ops-types';
+import type { AiAdminWorkerPrompt, AiAdminWorkerRunEvent } from '../../ai-admin-worker/protocol';
 import { HttpError } from '../../core/http';
 import { JsonStore, storePath } from '../../store/json-store';
 
+export const AI_ADMIN_CONTEXT_WINDOW_TOKENS = 256_000;
+export const AI_ADMIN_COMPACT_THRESHOLD = 0.9;
+
+type OpsPromptDispatcher = (workerId: string, prompt: AiAdminWorkerPrompt) => void | Promise<void>;
+
 type AgentState = {
 	jobs: AgentJob[];
+	opsRuns?: AgentOpsRun[];
+	opsSessions?: AgentOpsSession[];
 	workers?: AgentWorkerStatus[];
 };
 
 export class AgentService {
 	private readonly store: JsonStore<AgentState>;
+	private opsPromptDispatcher?: OpsPromptDispatcher;
 
 	constructor(dataDir: string) {
 		this.store = new JsonStore(storePath(dataDir, 'agent'), { jobs: [] });
+	}
+
+	setOpsPromptDispatcher(dispatcher: OpsPromptDispatcher) {
+		this.opsPromptDispatcher = dispatcher;
 	}
 
 	async list(status?: AgentJobStatus) {
@@ -28,7 +44,82 @@ export class AgentService {
 
 	async listWorkers() {
 		const state = await this.store.read();
-		return [...(state.workers ?? [])].sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt));
+		return [...(state.workers ?? [])].sort((a, b) => {
+			const connectedDelta = Number(b.connected === true) - Number(a.connected === true);
+			if (connectedDelta !== 0) return connectedDelta;
+			return b.lastSeenAt.localeCompare(a.lastSeenAt);
+		});
+	}
+
+	async listWorkerSessions(workerId: string) {
+		const state = await this.store.read();
+		return [...(state.opsSessions ?? [])]
+			.filter((session) => session.workerId === workerId)
+			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	}
+
+	async createWorkerSession(workerId: string, name?: string): Promise<AgentOpsSession> {
+		const now = new Date().toISOString();
+		let created: AgentOpsSession | undefined;
+		await this.store.update((state) => {
+			const worker = state.workers?.find((item) => item.id === workerId);
+			if (!worker) throw new HttpError(404, 'AGENT_WORKER_NOT_FOUND', 'Agent worker not found');
+			state.opsSessions ??= [];
+			const customName = name?.trim();
+			created = {
+				id: nanoid(),
+				workerId,
+				name: customName || 'New session',
+				titleSource: customName ? 'custom' : 'auto',
+				createdAt: now,
+				updatedAt: now
+			};
+			state.opsSessions.unshift(created);
+			state.opsSessions = state.opsSessions.slice(0, 500);
+		});
+		return created!;
+	}
+
+	async listSessionRuns(workerId: string, sessionId: string) {
+		const state = await this.store.read();
+		const session = state.opsSessions?.find(
+			(item) => item.id === sessionId && item.workerId === workerId
+		);
+		if (!session) throw new HttpError(404, 'AGENT_SESSION_NOT_FOUND', 'Agent session not found');
+		return [...(state.opsRuns ?? [])]
+			.filter((run) => run.workerId === workerId && run.sessionId === sessionId)
+			.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+	}
+
+	async deleteWorkerSession(workerId: string, sessionId: string) {
+		await this.store.update((state) => {
+			const sessions = state.opsSessions ?? [];
+			const index = sessions.findIndex(
+				(session) => session.id === sessionId && session.workerId === workerId
+			);
+			if (index === -1) {
+				throw new HttpError(404, 'AGENT_SESSION_NOT_FOUND', 'Agent session not found');
+			}
+			const hasActiveRun = (state.opsRuns ?? []).some(
+				(run) =>
+					run.workerId === workerId &&
+					run.sessionId === sessionId &&
+					(run.status === 'queued' || run.status === 'running')
+			);
+			if (hasActiveRun) {
+				throw new HttpError(
+					409,
+					'AGENT_SESSION_ACTIVE',
+					'Agent session has an active run and cannot be deleted'
+				);
+			}
+			sessions.splice(index, 1);
+			state.opsSessions = sessions;
+			state.opsRuns = (state.opsRuns ?? []).filter(
+				(run) => run.workerId !== workerId || run.sessionId !== sessionId
+			);
+		});
+		return { deleted: true };
 	}
 
 	async listWorkerQueue(limit: number) {
@@ -37,6 +128,206 @@ export class AgentService {
 			.filter((job) => job.status === 'approved')
 			.filter((job) => !job.executionStatus || job.executionStatus === 'queued')
 			.slice(0, limit);
+	}
+
+	async runOpsPrompt(workerId: string, sessionId: string, goal: string): Promise<AgentOpsRun> {
+		const normalizedGoal = goal.trim();
+		const now = new Date().toISOString();
+		const run: AgentOpsRun = {
+			id: nanoid(),
+			workerId,
+			sessionId,
+			createdAt: now,
+			updatedAt: now,
+			goal: normalizedGoal,
+			status: 'queued',
+			events: [
+				{
+					type: 'status',
+					message: 'Queued ops prompt for AI admin worker.',
+					at: now
+				}
+			]
+		};
+
+		await this.store.update((state) => {
+			const session = state.opsSessions?.find(
+				(item) => item.id === sessionId && item.workerId === workerId
+			);
+			if (!session) {
+				throw new HttpError(404, 'AGENT_SESSION_NOT_FOUND', 'Agent session not found');
+			}
+			if (!session.lastRunId && session.titleSource !== 'custom') {
+				session.name = summarizeSessionTitle(normalizedGoal);
+				session.titleSource = 'auto';
+			}
+			session.updatedAt = now;
+			session.lastRunId = run.id;
+			state.opsRuns ??= [];
+			state.opsRuns.unshift(run);
+			state.opsRuns = state.opsRuns.slice(0, 100);
+		});
+
+		try {
+			if (!this.opsPromptDispatcher) {
+				throw new HttpError(
+					503,
+					'AI_ADMIN_WORKER_NOT_CONFIGURED',
+					'AI admin worker bridge is not configured'
+				);
+			}
+			await this.opsPromptDispatcher(workerId, {
+				runId: run.id,
+				sessionId,
+				goal: normalizedGoal
+			});
+			return run;
+		} catch (error) {
+			return this.failOpsRun(run.id, errorMessage(error));
+		}
+	}
+
+	async getOpsRun(id: string) {
+		const state = await this.store.read();
+		const run = state.opsRuns?.find((item) => item.id === id);
+		if (!run) throw new HttpError(404, 'AGENT_RUN_NOT_FOUND', 'Agent run not found');
+		return run;
+	}
+
+	async applyOpsWorkerEvent(event: AiAdminWorkerRunEvent) {
+		let updated: AgentOpsRun | undefined;
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			const run = state.opsRuns?.find((item) => item.id === event.runId);
+			if (!run) throw new HttpError(404, 'AGENT_RUN_NOT_FOUND', 'Agent run not found');
+
+			run.updatedAt = now;
+			if (event.type === 'run_started') {
+				run.status = 'running';
+				run.events.push({
+					type: 'status',
+					message: 'AI admin worker started this run.',
+					at: now
+				});
+			}
+			if (event.type === 'text_delta') {
+				run.status = 'running';
+				run.result = `${run.result ?? ''}${event.text}`;
+				run.events.push({
+					type: 'text',
+					message: event.text,
+					at: now
+				});
+			}
+			if (event.type === 'tool_call' || event.type === 'tool_result') {
+				run.events.push({
+					type: 'tool',
+					message: event.message,
+					at: now
+				});
+			}
+			if (event.type === 'context_compacted') {
+				run.events.push({
+					type: 'compact',
+					message: event.message,
+					at: now
+				});
+			}
+			if (event.type === 'run_completed') {
+				run.status = 'completed';
+				if (event.result !== undefined) run.result = event.result;
+				delete run.error;
+				run.events.push({
+					type: 'done',
+					message: 'Run completed.',
+					at: now
+				});
+			}
+			if (event.type === 'run_failed') {
+				run.status = 'failed';
+				run.error = event.error;
+				run.events.push({
+					type: 'error',
+					message: event.error,
+					at: now
+				});
+			}
+			run.events = run.events.slice(-200);
+			const session = state.opsSessions?.find(
+				(item) => item.id === run.sessionId && item.workerId === run.workerId
+			);
+			if (session) {
+				session.updatedAt = now;
+				session.lastRunId = run.id;
+			}
+			updated = run;
+		});
+		return updated!;
+	}
+
+	async failActiveOpsRuns(message: string, workerId?: string) {
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			for (const run of state.opsRuns ?? []) {
+				if (run.status !== 'queued' && run.status !== 'running') continue;
+				if (workerId && run.workerId !== workerId) continue;
+				run.status = 'failed';
+				run.updatedAt = now;
+				run.error = message;
+				run.events.push({
+					type: 'error',
+					message,
+					at: now
+				});
+				run.events = run.events.slice(-200);
+			}
+		});
+	}
+
+	async connectAiAdminWorker(input: {
+		workerId: string;
+		apiBase?: string;
+		hostname?: string;
+		version?: string;
+		execute?: boolean;
+		allowedCommands?: string[];
+		terminal?: AgentWorkerTerminalStatus;
+	}) {
+		return this.upsertWorker({
+			id: input.workerId,
+			apiBase: input.apiBase,
+			hostname: input.hostname,
+			version: input.version,
+			execute: input.execute ?? false,
+			allowedCommands: input.allowedCommands ?? [],
+			transport: 'websocket',
+			connected: true,
+			terminal: input.terminal
+		});
+	}
+
+	async resetAiAdminWorkerConnections() {
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			for (const worker of state.workers ?? []) {
+				if (worker.transport !== 'websocket') continue;
+				worker.connected = false;
+				worker.lastSeenAt = now;
+				delete worker.currentJobId;
+			}
+		});
+	}
+
+	async disconnectAiAdminWorker(workerId: string) {
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			const worker = state.workers?.find((item) => item.id === workerId);
+			if (!worker) return;
+			worker.lastSeenAt = now;
+			worker.connected = false;
+			if (worker.transport !== 'websocket') worker.transport = 'websocket';
+			delete worker.currentJobId;
+		});
 	}
 
 	async suggest(goal: string, context?: string): Promise<AgentJob> {
@@ -90,6 +381,26 @@ export class AgentService {
 		return job;
 	}
 
+	private async failOpsRun(id: string, message: string) {
+		let updated: AgentOpsRun | undefined;
+		const now = new Date().toISOString();
+		await this.store.update((state) => {
+			const run = state.opsRuns?.find((item) => item.id === id);
+			if (!run) throw new HttpError(404, 'AGENT_RUN_NOT_FOUND', 'Agent run not found');
+			run.status = 'failed';
+			run.updatedAt = now;
+			run.error = message;
+			run.events.push({
+				type: 'error',
+				message,
+				at: now
+			});
+			run.events = run.events.slice(-200);
+			updated = run;
+		});
+		return updated!;
+	}
+
 	async approve(id: string, operatorNote?: string, commands?: AgentCommand[]) {
 		return this.transition(id, 'approved', operatorNote, commands);
 	}
@@ -107,29 +418,17 @@ export class AgentService {
 		allowedCommands: string[];
 		currentJobId?: string;
 	}) {
-		let updated: AgentWorkerStatus | undefined;
-		const now = new Date().toISOString();
-		await this.store.update((state) => {
-			state.workers ??= [];
-			const existing = state.workers.find((worker) => worker.id === input.workerId);
-			const next: AgentWorkerStatus = {
-				id: input.workerId,
-				lastSeenAt: now,
-				apiBase: input.apiBase,
-				hostname: input.hostname,
-				version: input.version,
-				execute: input.execute,
-				allowedCommands: input.allowedCommands,
-				currentJobId: input.currentJobId
-			};
-			if (existing) Object.assign(existing, next);
-			else state.workers.unshift(next);
-			state.workers = state.workers
-				.sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
-				.slice(0, 100);
-			updated = existing ?? next;
+		return this.upsertWorker({
+			id: input.workerId,
+			apiBase: input.apiBase,
+			hostname: input.hostname,
+			version: input.version,
+			execute: input.execute,
+			allowedCommands: input.allowedCommands,
+			currentJobId: input.currentJobId,
+			transport: 'poll',
+			connected: true
 		});
-		return updated!;
 	}
 
 	private async transition(
@@ -249,4 +548,49 @@ export class AgentService {
 		}
 		return job;
 	}
+
+	private async upsertWorker(
+		input: Omit<AgentWorkerStatus, 'lastSeenAt'> & { lastSeenAt?: string }
+	) {
+		let updated: AgentWorkerStatus | undefined;
+		const now = input.lastSeenAt ?? new Date().toISOString();
+		await this.store.update((state) => {
+			state.workers ??= [];
+			const existing = state.workers.find((worker) => worker.id === input.id);
+			const next: AgentWorkerStatus = {
+				...input,
+				lastSeenAt: now
+			};
+			if (existing) {
+				Object.assign(existing, next);
+				updated = existing;
+			} else {
+				state.workers.unshift(next);
+				updated = next;
+			}
+			state.workers = state.workers
+				.sort((a, b) => {
+					const connectedDelta = Number(b.connected === true) - Number(a.connected === true);
+					if (connectedDelta !== 0) return connectedDelta;
+					return b.lastSeenAt.localeCompare(a.lastSeenAt);
+				})
+				.slice(0, 100);
+		});
+		return updated!;
+	}
+}
+
+function errorMessage(error: unknown) {
+	if (error instanceof Error) return error.message;
+	return typeof error === 'string' ? error : 'AI admin worker request failed';
+}
+
+function summarizeSessionTitle(goal: string) {
+	const normalized = goal
+		.replace(/\s+/g, ' ')
+		.replace(/^[#*>\s-]+/, '')
+		.trim();
+	if (!normalized) return 'New session';
+	const sentence = normalized.split(/[。！？.!?]/)[0]?.trim() || normalized;
+	return sentence.length > 36 ? `${sentence.slice(0, 36)}...` : sentence;
 }

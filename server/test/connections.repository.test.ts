@@ -1,24 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { ConnectionsRepository } from '../src/modules/connections/connections.repository';
 
-async function withRepository(fn: (repository: ConnectionsRepository) => Promise<void>) {
-	const dataDir = await mkdtemp(path.join(os.tmpdir(), 'gang-ops-connections-'));
-	const key = Buffer.from('12345678901234567890123456789012');
-	const repository = new ConnectionsRepository(dataDir, key);
-	try {
-		await fn(repository);
-	} finally {
-		await rm(dataDir, { recursive: true, force: true });
-	}
-}
-
-test('connection updates preserve existing secrets when secret fields are omitted', async () => {
-	await withRepository(async (repository) => {
-		const created = await repository.create({
+test('connection repository exposes configured presets with secrets', async () => {
+	const repository = new ConnectionsRepository({
+		mysql: {
+			id: 'main-db',
 			type: 'mysql',
 			name: 'primary',
 			tags: ['prod'],
@@ -30,25 +17,37 @@ test('connection updates preserve existing secrets when secret fields are omitte
 				password: 'secret-password',
 				ssl: false
 			}
-		});
-
-		await repository.update(created.id, {
-			type: 'mysql',
-			name: 'primary-renamed',
-			tags: ['prod', 'critical'],
-			config: {
-				host: 'db.internal',
-				port: 3306,
-				database: 'gang',
-				user: 'ops',
-				ssl: true
+		},
+		s3: null,
+		ssh: [
+			{
+				id: 'pi-1',
+				type: 'ssh',
+				name: 'Pi 1',
+				config: { host: '10.0.0.2', port: 22, username: 'pi', password: 'raspberry' }
 			}
-		});
-
-		const withSecrets = await repository.getWithSecrets(created.id);
-
-		assert.equal(withSecrets.name, 'primary-renamed');
-		assert.equal('host' in withSecrets.config ? withSecrets.config.host : undefined, 'db.internal');
-		assert.deepEqual(withSecrets.secrets, { password: 'secret-password' });
+		]
 	});
+
+	const mysql = await repository.list('mysql');
+	const ssh = await repository.list('ssh');
+	const withSecrets = await repository.getWithSecrets('main-db');
+
+	assert.equal(mysql.length, 1);
+	assert.equal(ssh.length, 1);
+	assert.equal(mysql[0].id, 'main-db');
+	assert.equal('password' in mysql[0].config, false);
+	assert.deepEqual(withSecrets.secrets, { password: 'secret-password' });
+});
+
+test('connection repository rejects runtime mutation', async () => {
+	const repository = new ConnectionsRepository({ mysql: null, s3: null, ssh: [] });
+	await assert.rejects(
+		repository.create({
+			type: 'ssh',
+			name: 'new ssh',
+			config: { host: '127.0.0.1', port: 22, username: 'root' }
+		}),
+		/Connection presets are configured in config.json/
+	);
 });

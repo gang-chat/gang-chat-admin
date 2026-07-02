@@ -1,63 +1,74 @@
 <script lang="ts">
-	import { Bot, Database, HardDrive, RefreshCw, Settings, Terminal, Wallet } from '@lucide/svelte';
+	import { Bot, Database, HardDrive, RefreshCw, Wallet } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { ApiClient, ApiClientError } from '$lib/api/client';
 	import AgentPanel from '$lib/components/ops/AgentPanel.svelte';
-	import ConnectionsPanel from '$lib/components/ops/ConnectionsPanel.svelte';
 	import ExpensesPanel from '$lib/components/ops/ExpensesPanel.svelte';
 	import MysqlWorkbench from '$lib/components/ops/MysqlWorkbench.svelte';
 	import S3Browser from '$lib/components/ops/S3Browser.svelte';
-	import TerminalWorkspace from '$lib/components/ops/TerminalWorkspace.svelte';
 	import type { RunTask } from '$lib/components/ops/types';
 	import type {
-		AuditEvent,
-		AuditIntegrity,
 		AuthRole,
 		AuthUser,
 		ConnectionPreset
 	} from '$lib/shared/ops-types';
 
-	type View = 'mysql' | 's3' | 'ssh' | 'expenses' | 'agent' | 'settings';
+	type View = 'mysql' | 's3' | 'expenses' | 'agent';
 
-	const apiBase = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8787';
-	const wsBase = import.meta.env.VITE_WS_BASE ?? apiBase.replace(/^http/, 'ws');
-	const defaultToken = import.meta.env.DEV ? 'dev-admin-token' : '';
-	const defaultLoginUsername = import.meta.env.DEV ? 'admin' : '';
+	const apiBase = '';
 
-	let view = $state<View>('mysql');
-	let token = $state(defaultToken);
+	let token = $state('');
 	let actor = $state('');
-	let loginUsername = $state(defaultLoginUsername);
+	let loginUsername = $state('');
 	let loginPassword = $state('');
 	let health = $state('unknown');
 	let busy = $state(false);
 	let message = $state('');
+	let activeSection = $state<View>('mysql');
 	let connections = $state<ConnectionPreset[]>([]);
-	let audit = $state<AuditEvent[]>([]);
-	let auditIntegrity = $state<AuditIntegrity | undefined>();
 	let currentUser = $state<AuthUser | undefined>();
 
 	let api = $derived(new ApiClient(apiBase, token, actor));
 	let mysqlConnections = $derived(connections.filter((item) => item.type === 'mysql'));
 	let s3Connections = $derived(connections.filter((item) => item.type === 's3'));
-	let sshConnections = $derived(connections.filter((item) => item.type === 'ssh'));
 	let currentRole = $derived<AuthRole | undefined>(currentUser?.role);
-	let isAdmin = $derived(currentRole === 'admin');
+	let isAuthenticated = $derived(Boolean(token.trim() && currentUser));
 
 	const navItems: Array<{ id: View; label: string; icon: typeof Database }> = [
 		{ id: 'mysql', label: 'MySQL', icon: Database },
 		{ id: 's3', label: 'S3', icon: HardDrive },
-		{ id: 'ssh', label: 'SSH', icon: Terminal },
-		{ id: 'expenses', label: 'Cost', icon: Wallet },
 		{ id: 'agent', label: 'Agent', icon: Bot },
-		{ id: 'settings', label: 'Connections', icon: Settings }
+		{ id: 'expenses', label: 'Cost', icon: Wallet }
 	];
 
-	onMount(async () => {
-		token = localStorage.getItem('ops-admin-token') ?? defaultToken;
+	onMount(() => {
+		token = localStorage.getItem('ops-admin-token') ?? '';
 		actor = localStorage.getItem('ops-actor') ?? '';
-		await refreshAll();
+		void refreshAll().then(updateActiveSection);
+		updateActiveSection();
+		window.addEventListener('scroll', updateActiveSection, { passive: true });
+		return () => window.removeEventListener('scroll', updateActiveSection);
 	});
+
+	function updateActiveSection() {
+		let next = activeSection;
+		let closest = Number.POSITIVE_INFINITY;
+		for (const item of navItems) {
+			const element = document.getElementById(item.id);
+			if (!element) continue;
+			const distance = Math.abs(element.getBoundingClientRect().top - 80);
+			if (distance < closest) {
+				closest = distance;
+				next = item.id;
+			}
+		}
+		activeSection = next;
+	}
+
+	function scrollToSection(id: View) {
+		activeSection = id;
+		document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+	}
 
 	const run: RunTask = async (task, success) => {
 		busy = true;
@@ -88,72 +99,25 @@
 			health = `${h.status} / ${h.mode}`;
 			if (!token.trim()) {
 				connections = [];
-				audit = [];
-				auditIntegrity = undefined;
 				currentUser = undefined;
-				message = 'Enter admin token';
 				return;
 			}
 			await refreshIdentity();
 			await refreshConnections();
-			if (isAdmin) await refreshAudit();
-			else {
-				audit = [];
-				auditIntegrity = undefined;
-			}
 		});
 	}
 
 	async function refreshIdentity() {
-		try {
-			const identity = await api.me();
-			currentUser = identity.user;
-			if (!actor.trim()) actor = identity.user.displayName || identity.user.username;
-		} catch {
-			currentUser = {
-				id: 'legacy-token',
-				username: 'legacy-token',
-				displayName: actor.trim() || 'legacy token',
-				role: 'admin',
-				disabled: false,
-				createdAt: new Date(0).toISOString(),
-				updatedAt: new Date(0).toISOString()
-			};
-		}
+		const identity = await api.me();
+		currentUser = identity.user;
+		if (!actor.trim()) actor = identity.user.displayName || identity.user.username;
 	}
 
 	async function refreshConnections() {
 		connections = await api.connections();
 	}
 
-	async function refreshAudit() {
-		if (!isAdmin) {
-			audit = [];
-			auditIntegrity = undefined;
-			return;
-		}
-		[audit, auditIntegrity] = await Promise.all([api.audit({ limit: 200 }), api.auditIntegrity()]);
-	}
-
-	function saveToken() {
-		const trimmed = token.trim();
-		const actorName = actor.trim();
-		if (actorName) localStorage.setItem('ops-actor', actorName);
-		else localStorage.removeItem('ops-actor');
-		if (trimmed) {
-			token = trimmed;
-			localStorage.setItem('ops-admin-token', trimmed);
-			message = actorName ? 'Token and operator saved locally' : 'Token saved locally';
-			void refreshAll();
-			return;
-		}
-		localStorage.removeItem('ops-admin-token');
-		connections = [];
-		audit = [];
-		auditIntegrity = undefined;
-		currentUser = undefined;
-		message = actorName ? 'Token cleared' : 'Token and operator cleared';
-	}
+	async function refreshAudit() {}
 
 	async function login() {
 		await run(async () => {
@@ -173,10 +137,10 @@
 		await run(async () => {
 			if (token.trim()) await api.logout().catch(() => undefined);
 			localStorage.removeItem('ops-admin-token');
+			localStorage.removeItem('ops-actor');
 			token = '';
+			actor = '';
 			connections = [];
-			audit = [];
-			auditIntegrity = undefined;
 			currentUser = undefined;
 			message = 'Signed out';
 		});
@@ -187,122 +151,95 @@
 	<title>Gang Chat Ops</title>
 </svelte:head>
 
-<main class="grid min-h-screen grid-cols-[220px_1fr] bg-zinc-100 text-zinc-950">
-	<aside class="flex min-h-screen flex-col border-r border-zinc-200 bg-zinc-950 text-zinc-100">
-		<div class="border-b border-zinc-800 px-4 py-4">
-			<div class="text-sm font-semibold">Gang Chat Ops</div>
-			<div class="mt-1 text-xs text-zinc-400">operations control plane</div>
+{#if !isAuthenticated}
+	<main class="ops-page-bg flex min-h-screen items-center justify-center px-4 text-foreground">
+		<section class="login-card">
+			<div class="mb-6">
+				<div class="text-[40px] font-semibold leading-tight tracking-[-0.02em]">Gang Chat Ops</div>
+				<div class="mt-2 text-[21px] leading-snug text-[#333]">Sign in to the control plane.</div>
+				<div class="mt-5 text-sm text-[#7a7a7a]">API {health}</div>
+			</div>
+
+			<label class="block text-sm font-medium text-zinc-700" for="ops-username">Username</label>
+			<input
+				id="ops-username"
+				class="mt-1 h-10 w-full rounded-md border-zinc-300 text-sm"
+				bind:value={loginUsername}
+				autocomplete="username"
+			/>
+
+			<label class="mt-4 block text-sm font-medium text-zinc-700" for="ops-password">Password</label>
+			<input
+				id="ops-password"
+				class="mt-1 h-10 w-full rounded-md border-zinc-300 text-sm"
+				type="password"
+				bind:value={loginPassword}
+				autocomplete="current-password"
+				onkeydown={(event) => {
+					if (event.key === 'Enter' && loginUsername && loginPassword) void login();
+				}}
+			/>
+
+			<button
+				class="command-button mt-5 h-10 w-full"
+				onclick={login}
+				disabled={!loginUsername || !loginPassword || busy}
+			>
+				Login
+			</button>
+
+			{#if message}
+				<div class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+					{message}
+				</div>
+			{/if}
+		</section>
+	</main>
+{:else}
+<main class="ops-page-bg min-h-screen space-y-8 px-4 py-4 pr-24 pb-16 text-foreground sm:px-6 sm:pr-28">
+	{#if message}
+		<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+			{message}
 		</div>
-		<nav class="flex-1 space-y-1 p-2">
+	{/if}
+
+	<section id="mysql" class="scroll-mt-6">
+		<MysqlWorkbench
+			{api}
+			{mysqlConnections}
+			{run}
+		/>
+	</section>
+
+	<section id="s3" class="scroll-mt-6">
+		<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
+	</section>
+
+	<section id="agent" class="scroll-mt-6">
+		<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
+	</section>
+
+	<section id="expenses" class="scroll-mt-6">
+		<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
+	</section>
+
+	<aside class="wheel-rail" aria-label="Page navigation">
+		<div class="floating-wheel">
 			{#each navItems as item (item.id)}
 				{@const Icon = item.icon}
 				<button
-					class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition hover:bg-zinc-800 {view ===
-					item.id
-						? 'bg-zinc-800 text-cyan-200'
-						: 'text-zinc-300'}"
-					onclick={() => (view = item.id)}
+					class="wheel-button {activeSection === item.id ? 'active' : ''}"
+					title={item.label}
+					onclick={() => scrollToSection(item.id)}
 				>
 					<Icon class="size-4" />
-					{item.label}
 				</button>
 			{/each}
-		</nav>
-		<div class="border-t border-zinc-800 p-3 text-xs text-zinc-400">
-			<div>API {health}</div>
-			<div class="mt-1 truncate">{apiBase}</div>
+			<button class="wheel-button" title="Refresh" onclick={refreshAll} disabled={busy}>
+				<RefreshCw class="size-4 {busy ? 'animate-spin' : ''}" />
+			</button>
+			<button class="wheel-button wheel-exit" title={`Sign out ${actor}`} onclick={logout}>×</button>
 		</div>
 	</aside>
-
-	<section class="flex min-w-0 flex-col">
-		<header class="flex h-14 items-center justify-between border-b border-zinc-200 bg-white px-4">
-			<div>
-				<div class="text-sm font-semibold">Ops Panel</div>
-				<div class="text-xs text-zinc-500">MySQL / S3 / SSH / Cost / Agent</div>
-			</div>
-			<div class="flex items-center gap-2">
-				{#if currentRole}
-					<span class="rounded border border-zinc-200 bg-zinc-50 px-2 py-1 text-xs text-zinc-600">
-						{currentRole}
-					</span>
-				{/if}
-				<input
-					class="h-9 w-36 rounded-md border-zinc-300 text-xs"
-					bind:value={actor}
-					placeholder="operator"
-				/>
-				<input
-					class="h-9 w-32 rounded-md border-zinc-300 text-xs"
-					bind:value={loginUsername}
-					placeholder="username"
-				/>
-				<input
-					class="h-9 w-40 rounded-md border-zinc-300 text-xs"
-					type="password"
-					bind:value={loginPassword}
-					placeholder="password"
-					onkeydown={(event) => {
-						if (event.key === 'Enter') void login();
-					}}
-				/>
-				<button
-					class="command-button h-9"
-					onclick={login}
-					disabled={!loginUsername || !loginPassword}
-				>
-					Login
-				</button>
-				<input
-					class="h-9 w-56 rounded-md border-zinc-300 text-xs"
-					type="password"
-					bind:value={token}
-					placeholder="session or admin token"
-				/>
-				<button class="icon-button" title="Save token" onclick={saveToken}>
-					<Settings class="size-4" />
-				</button>
-				<button class="command-button h-9" onclick={logout} disabled={!token.trim()}>Logout</button>
-				<button class="icon-button" title="Refresh" onclick={refreshAll} disabled={busy}>
-					<RefreshCw class="size-4 {busy ? 'animate-spin' : ''}" />
-				</button>
-			</div>
-		</header>
-
-		{#if message}
-			<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-				{message}
-			</div>
-		{/if}
-
-		<div class="min-h-0 flex-1 overflow-auto p-4">
-			{#if view === 'mysql'}
-				<MysqlWorkbench
-					{api}
-					{mysqlConnections}
-					{currentRole}
-					{run}
-					onAuditRefresh={refreshAudit}
-				/>
-			{:else if view === 's3'}
-				<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
-			{:else if view === 'ssh'}
-				<TerminalWorkspace {api} {sshConnections} {wsBase} {currentRole} />
-			{:else if view === 'expenses'}
-				<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
-			{:else if view === 'agent'}
-				<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
-			{:else}
-				<ConnectionsPanel
-					{api}
-					{connections}
-					{audit}
-					{auditIntegrity}
-					{currentRole}
-					{run}
-					onConnectionsRefresh={refreshConnections}
-					onAuditRefresh={refreshAudit}
-				/>
-			{/if}
-		</div>
-	</section>
 </main>
+{/if}

@@ -97,6 +97,19 @@ test('agent worker command policy blocks unapproved executables and shell chaini
 	);
 });
 
+test('agent worker command policy supports explicit full access wildcard', () => {
+	assert.equal(
+		validateCommandPolicy('node -v && whoami > /tmp/worker-policy-test', {
+			allowedCommands: ['*']
+		}),
+		''
+	);
+	assert.equal(
+		validateCommandPolicy('some-unlisted-binary --flag', { allowedCommands: ['*'] }),
+		''
+	);
+});
+
 test('agent worker times out long-running commands', async () => {
 	const result = await runCommand('node -e "setTimeout(() => {}, 5000)"', {
 		timeoutMs: 100,

@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { Pencil, Plus, Trash2, X } from '@lucide/svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import { Input } from '$lib/components/ui/input';
+	import * as Table from '$lib/components/ui/table';
 	import type { ApiClient } from '$lib/api/client';
 	import type { AuthRole, ExpenseEntry, ExpenseInput, ExpenseSummary } from '$lib/shared/ops-types';
 	import type { RunTask } from './types';
@@ -101,41 +106,44 @@
 </script>
 
 <section class="workspace">
-	<div class="toolbar">
-		<input type="month" bind:value={month} onchange={loadExpenses} />
-		<div class="text-sm font-medium">
+	<div class="mb-4 flex items-center gap-3">
+		<Input class="w-44" type="month" bind:value={month} onchange={loadExpenses} />
+		<Badge variant="secondary">
 			Total {summary?.total ?? 0}
 			{summary?.currency ?? 'CNY'}
-		</div>
+		</Badge>
 	</div>
 	<div class="grid grid-cols-[360px_1fr] gap-4">
-		<div class="panel">
-			<div class="flex items-center justify-between">
-				<div class="panel-title">{editingId ? 'Edit Expense' : 'Manual Expense'}</div>
+		<Card.Root>
+			<Card.Header>
+				<div class="flex items-center justify-between">
+					<Card.Title>{editingId ? 'Edit Expense' : 'Manual Expense'}</Card.Title>
 				{#if editingId}
-					<button class="icon-button" title="Cancel edit" onclick={resetForm}>
+					<Button variant="ghost" size="icon" title="Cancel edit" onclick={resetForm}>
 						<X class="size-4" />
-					</button>
+					</Button>
 				{/if}
-			</div>
-			<div class="form-grid">
-				<input type="month" bind:value={form.month} />
-				<input bind:value={form.category} placeholder="category" />
-				<input bind:value={form.vendor} placeholder="vendor" />
-				<input type="number" bind:value={form.amount} placeholder="amount" />
-				<input bind:value={form.currency} placeholder="currency" />
-				<input bind:value={form.note} placeholder="note" />
-			</div>
-			<button class="command-button mt-3" onclick={saveExpense} disabled={!canOperate}>
+				</div>
+			</Card.Header>
+			<Card.Content class="space-y-2">
+				<Input type="month" bind:value={form.month} />
+				<Input bind:value={form.category} placeholder="category" />
+				<Input bind:value={form.vendor} placeholder="vendor" />
+				<Input type="number" bind:value={form.amount} placeholder="amount" />
+				<Input bind:value={form.currency} placeholder="currency" />
+				<Input bind:value={form.note} placeholder="note" />
+				<Button class="mt-1" onclick={saveExpense} disabled={!canOperate}>
 				<Plus class="size-4" />
 				{editingId ? 'Update' : 'Save'}
-			</button>
-		</div>
-		<div class="panel overflow-auto">
-			<div class="flex items-start justify-between gap-3">
-				<div class="panel-title">Monthly Ledger</div>
+				</Button>
+			</Card.Content>
+		</Card.Root>
+		<Card.Root class="overflow-auto">
+			<Card.Header>
+				<div class="flex items-start justify-between gap-3">
+					<Card.Title>Monthly Ledger</Card.Title>
 				{#if deleteExpenseTarget}
-					<div class="w-80 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-950">
+					<div class="text-destructive w-80 rounded-lg border p-2 text-xs">
 						<div class="font-semibold">Confirm expense delete</div>
 						<div class="mt-1">
 							{deleteExpenseTarget.month} / {deleteExpenseTarget.vendor} /
@@ -143,66 +151,71 @@
 							{deleteExpenseTarget.currency}
 						</div>
 						<div class="mt-1 break-all">id: {deleteExpenseTarget.id}</div>
-						<input
-							class="mt-2 w-full rounded border-red-200 text-xs"
+						<Input
+							class="mt-2"
 							bind:value={deleteExpenseConfirmation}
 							placeholder="type expense id to delete"
 						/>
 						<div class="mt-2 flex gap-2">
-							<button
-								class="danger-button compact"
+							<Button
+								variant="destructive"
+								size="sm"
 								onclick={deleteExpense}
 								disabled={!canOperate || deleteExpenseConfirmation !== deleteExpenseTarget.id}
 							>
 								<Trash2 class="size-3" /> Delete
-							</button>
-							<button
-								class="command-button compact"
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
 								onclick={() => {
 									deleteExpenseId = undefined;
 									deleteExpenseConfirmation = '';
 								}}
 							>
 								Cancel
-							</button>
+							</Button>
 						</div>
 					</div>
 				{/if}
-			</div>
-			<table class="data-table">
-				<thead
-					><tr
-						><th>Month</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Note</th><th></th></tr
-					></thead
-				>
-				<tbody>
+				</div>
+			</Card.Header>
+			<Card.Content>
+			<Table.Root>
+				<Table.Header>
+					<Table.Row><Table.Head>Month</Table.Head><Table.Head>Category</Table.Head><Table.Head>Vendor</Table.Head><Table.Head>Amount</Table.Head><Table.Head>Note</Table.Head><Table.Head></Table.Head></Table.Row>
+				</Table.Header>
+				<Table.Body>
 					{#each expenses as item (item.id)}
-						<tr>
-							<td>{item.month}</td>
-							<td>{item.category}</td>
-							<td>{item.vendor}</td>
-							<td>{item.amount} {item.currency}</td>
-							<td>{item.note ?? ''}</td>
-							<td class="text-right">
-								<button
-									class="command-button compact"
+						<Table.Row>
+							<Table.Cell>{item.month}</Table.Cell>
+							<Table.Cell>{item.category}</Table.Cell>
+							<Table.Cell>{item.vendor}</Table.Cell>
+							<Table.Cell>{item.amount} {item.currency}</Table.Cell>
+							<Table.Cell>{item.note ?? ''}</Table.Cell>
+							<Table.Cell class="text-right">
+								<Button
+									variant="ghost"
+									size="icon-xs"
 									onclick={() => editExpense(item)}
 									disabled={!canOperate}
 								>
 									<Pencil class="size-3" />
-								</button>
-								<button
-									class="danger-button compact"
+								</Button>
+								<Button
+									variant="destructive"
+									size="icon-xs"
 									onclick={() => prepareDeleteExpense(item.id)}
 									disabled={!canOperate}
 								>
 									<Trash2 class="size-3" />
-								</button>
-							</td>
-						</tr>
+								</Button>
+							</Table.Cell>
+						</Table.Row>
 					{/each}
-				</tbody>
-			</table>
-		</div>
+				</Table.Body>
+			</Table.Root>
+			</Card.Content>
+		</Card.Root>
 	</div>
 </section>

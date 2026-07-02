@@ -1,28 +1,22 @@
 <script lang="ts">
-	import { ChevronLeft, ChevronRight, Copy, Play, Plus, RefreshCw, Trash2 } from '@lucide/svelte';
+	import { ChevronLeft, ChevronRight, RefreshCw } from '@lucide/svelte';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
+	import * as Table from '$lib/components/ui/table';
 	import type { ApiClient } from '$lib/api/client';
-	import type {
-		ConnectionPreset,
-		AuthRole,
-		MysqlColumn,
-		MysqlQueryResult,
-		MysqlSqlMode,
-		MysqlTableSummary
-	} from '$lib/shared/ops-types';
+	import type { ConnectionPreset, MysqlColumn, MysqlTableSummary } from '$lib/shared/ops-types';
 	import type { RunTask } from './types';
 
 	let {
 		api,
 		mysqlConnections,
-		currentRole,
-		run,
-		onAuditRefresh
+		run
 	}: {
 		api: ApiClient;
 		mysqlConnections: ConnectionPreset[];
-		currentRole?: AuthRole;
 		run: RunTask;
-		onAuditRefresh: () => Promise<void>;
 	} = $props();
 
 	let connectionId = $state('');
@@ -31,18 +25,8 @@
 	let schema = $state<MysqlColumn[]>([]);
 	let rows = $state<Record<string, unknown>[]>([]);
 	let rowLimit = $state(100);
+	let rowLimitValue = $state('100');
 	let rowOffset = $state(0);
-	let selectedRowKey = $state('');
-	let sqlText = $state('SELECT 1 AS ok;');
-	let sqlMode = $state<MysqlSqlMode>('read-only');
-	let sqlMaxRows = $state(200);
-	let sqlTimeoutMs = $state(10000);
-	let sqlMutationConfirmation = $state('');
-	let sqlResult = $state<MysqlQueryResult | undefined>();
-	let rowJson = $state('{\n  "id": 1\n}');
-	let patchJson = $state('{\n  "name": "new value"\n}');
-	let insertJson = $state('{\n  "name": "new value"\n}');
-	let deleteRowConfirmation = $state('');
 
 	let selectedTable = $derived(tables.find((table) => table.name === tableName));
 	let selectedConnection = $derived(
@@ -51,23 +35,12 @@
 	let mutationsAllowed = $derived(
 		Boolean(
 			selectedConnection?.config &&
-			'allowMutations' in selectedConnection.config &&
-			selectedConnection.config.allowMutations
+				'allowMutations' in selectedConnection.config &&
+				selectedConnection.config.allowMutations
 		)
 	);
-	let canOperate = $derived(currentRole === 'operator' || currentRole === 'admin');
 	let displayFields = $derived(
 		rows[0] ? Object.keys(rows[0]) : schema.map((column) => column.field)
-	);
-	let primaryColumns = $derived(schema.filter((column) => column.key === 'PRI'));
-	let uniqueColumns = $derived(schema.filter((column) => column.key === 'UNI'));
-	let rowKeyColumns = $derived(primaryColumns.length > 0 ? primaryColumns : uniqueColumns);
-	let rowKeyLabel = $derived(
-		primaryColumns.length > 0
-			? 'primary key'
-			: uniqueColumns.length > 0
-				? 'unique key'
-				: 'no primary or unique key'
 	);
 	let canPageBackward = $derived(rowOffset > 0);
 	let canPageForward = $derived(rows.length >= rowLimit);
@@ -88,71 +61,18 @@
 		await run(async () => {
 			schema = await api.mysqlSchema(connectionId, tableName);
 			rows = await api.mysqlRows(connectionId, tableName, Number(rowLimit), Number(rowOffset));
-			selectedRowKey = '';
-			insertJson = formatJson(buildInsertTemplate());
-			deleteRowConfirmation = '';
 		});
 	}
 
-	async function executeSql() {
-		if (!connectionId) return;
-		await run(async () => {
-			sqlResult = await api.mysqlQuery(connectionId, sqlText, {
-				mode: sqlMode,
-				maxRows: Number(sqlMaxRows),
-				timeoutMs: Number(sqlTimeoutMs),
-				mutationConfirmation: sqlMutationConfirmation
-			});
-			await onAuditRefresh();
-		}, 'SQL executed');
-	}
-
-	async function insertRow() {
-		if (!connectionId || !tableName) return;
-		await run(async () => {
-			await api.mysqlInsert(connectionId, tableName, parseJson(insertJson));
-			await loadTable();
-			await onAuditRefresh();
-		}, 'Row inserted');
-	}
-
-	async function updateRow() {
-		if (!connectionId || !tableName) return;
-		await run(async () => {
-			await api.mysqlUpdate(connectionId, tableName, parseJson(rowJson), parseJson(patchJson));
-			await loadTable();
-			await onAuditRefresh();
-		}, 'Row updated');
-	}
-
-	async function deleteRow() {
-		if (!connectionId || !tableName) return;
-		if (deleteRowConfirmation !== tableName) return;
-		await run(async () => {
-			await api.mysqlDelete(connectionId, tableName, parseJson(rowJson), deleteRowConfirmation);
-			deleteRowConfirmation = '';
-			await loadTable();
-			await onAuditRefresh();
-		}, 'Row deleted');
-	}
-
-	function parseJson(value: string) {
-		return JSON.parse(value) as Record<string, unknown>;
+	function updateRowLimit(value: string) {
+		rowLimitValue = value;
+		rowLimit = Number(value);
+		void loadTable(true);
 	}
 
 	function selectTable(name: string) {
 		tableName = name;
 		void loadTable(true);
-	}
-
-	function selectRow(row: Record<string, unknown>, rowIndex: number) {
-		selectedRowKey = `${rowOffset}:${rowIndex}`;
-		rowJson = formatJson(primaryKeyForRow(row));
-		patchJson = formatJson(patchForRow(row));
-	}
-
-	function applyInsertTemplate() {
-		rowJson = insertJson;
 	}
 
 	function previousPage() {
@@ -167,284 +87,118 @@
 		void loadTable();
 	}
 
-	function buildInsertTemplate() {
-		const template: Record<string, unknown> = {};
-		for (const column of schema) {
-			if (column.extra.toLowerCase().includes('auto_increment')) continue;
-			template[column.field] = column.defaultValue ?? sampleValue(column);
-		}
-		return template;
-	}
-
-	function primaryKeyForRow(row: Record<string, unknown>) {
-		const keys = rowKeyColumns.map((column) => column.field);
-		return Object.fromEntries(keys.map((key) => [key, row[key]]));
-	}
-
-	function patchForRow(row: Record<string, unknown>) {
-		const primaryFields = new Set(rowKeyColumns.map((column) => column.field));
-		const entries = Object.entries(row).filter(([key]) => !primaryFields.has(key));
-		return Object.fromEntries(entries.length > 0 ? entries : Object.entries(row));
-	}
-
-	function sampleValue(column: MysqlColumn) {
-		const type = column.type.toLowerCase();
-		if (
-			type.includes('int') ||
-			type.includes('decimal') ||
-			type.includes('float') ||
-			type.includes('double')
-		)
-			return 0;
-		if (type.includes('bool') || type === 'tinyint(1)') return false;
-		if (type.includes('json')) return {};
-		if (type.includes('date') || type.includes('time')) return new Date().toISOString();
-		return '';
-	}
-
-	function formatJson(value: Record<string, unknown>) {
-		return JSON.stringify(value, null, 2);
-	}
+	$effect(() => {
+		if (rowLimitValue !== String(rowLimit)) rowLimitValue = String(rowLimit);
+	});
 
 	$effect(() => {
-		if (!mutationsAllowed && sqlMode !== 'read-only') {
-			sqlMode = 'read-only';
-			sqlMutationConfirmation = '';
+		const configuredId = mysqlConnections[0]?.id ?? '';
+		if (configuredId && connectionId !== configuredId) {
+			connectionId = configuredId;
+			void loadTables();
 		}
 	});
 </script>
 
-<section class="workspace">
-	<div class="toolbar">
-		<select bind:value={connectionId} onchange={loadTables}>
-			<option value="">Select MySQL connection</option>
-			{#each mysqlConnections as item (item.id)}
-				<option value={item.id}>{item.name}</option>
-			{/each}
-		</select>
-		<select bind:value={tableName} onchange={() => loadTable(true)}>
-			<option value="">Select table</option>
-			{#each tables as table (table.name)}
-				<option value={table.name}>{table.name}</option>
-			{/each}
-		</select>
-		<select bind:value={rowLimit} onchange={() => loadTable(true)} aria-label="Row page size">
-			<option value={50}>50 rows</option>
-			<option value={100}>100 rows</option>
-			<option value={250}>250 rows</option>
-			<option value={500}>500 rows</option>
-		</select>
-		<button class="command-button" onclick={() => loadTable()}>
-			<RefreshCw class="size-4" /> Reload
-		</button>
-		{#if selectedConnection}
-			<span
-				class="rounded border px-2 py-1 text-xs {mutationsAllowed
-					? 'border-amber-300 bg-amber-50 text-amber-900'
-					: 'border-emerald-300 bg-emerald-50 text-emerald-900'}"
-			>
-				{mutationsAllowed ? 'writes enabled' : 'read only preset'}
-			</span>
-		{/if}
-	</div>
-	<div class="grid min-h-[640px] grid-cols-[260px_1fr] gap-4">
-		<div class="panel overflow-auto">
-			<div class="panel-title">Tables</div>
-			{#each tables as table (table.name)}
-				<button
-					class="list-row {tableName === table.name ? 'active' : ''}"
-					onclick={() => {
-						selectTable(table.name);
-					}}
-				>
-					<span>{table.name}</span>
-					<span>{table.rows ?? 0}</span>
-				</button>
-			{/each}
-		</div>
-		<div class="grid min-w-0 grid-rows-[250px_1fr] gap-4">
-			<div class="grid grid-cols-2 gap-4">
-				<div class="panel">
-					<div class="panel-title">SQL Console</div>
-					<textarea class="code-input h-28" bind:value={sqlText}></textarea>
-					<div class="mt-2 grid grid-cols-[1.2fr_0.8fr_0.9fr_auto] gap-2">
-						<select bind:value={sqlMode} disabled={!mutationsAllowed || !canOperate}>
-							<option value="read-only">Read only</option>
-							<option value="allow-mutations">Allow mutations</option>
-						</select>
-						<input type="number" min="1" max="1000" bind:value={sqlMaxRows} aria-label="Max rows" />
-						<input
-							type="number"
-							min="1000"
-							max="60000"
-							step="1000"
-							bind:value={sqlTimeoutMs}
-							aria-label="Timeout milliseconds"
-						/>
-						<button class="command-button" onclick={executeSql}>
-							<Play class="size-4" /> Execute
-						</button>
+<section class="workspace space-y-4">
+	{#if !connectionId}
+		<Card.Root>
+			<Card.Content class="text-muted-foreground text-sm">
+				<div class="text-foreground font-medium">No MySQL connection configured</div>
+				<div class="mt-1">
+					This is a preview shell. Add <code>connections.mysql</code> in config.json and restart to enable data operations.
+				</div>
+			</Card.Content>
+		</Card.Root>
+	{:else}
+		<div class="grid min-h-[640px] grid-cols-[260px_1fr] gap-4">
+		<Card.Root>
+			<Card.Header>
+				<div class="flex items-start justify-between gap-2">
+					<div>
+						<Card.Title>Tables</Card.Title>
+						<Card.Description>{selectedConnection?.name ?? 'MySQL not configured'}</Card.Description>
 					</div>
-					{#if sqlMode === 'allow-mutations'}
-						<div
-							class="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900"
-						>
-							Mutation mode is active. Single-statement SQL is still enforced.
-						</div>
-						<input
-							class="mt-2 w-full"
-							bind:value={sqlMutationConfirmation}
-							placeholder="type RUN MUTATION for mutation SQL"
-						/>
+					{#if selectedConnection}
+						<Badge variant={mutationsAllowed ? 'secondary' : 'outline'}>
+							{mutationsAllowed ? 'writes' : 'read only'}
+						</Badge>
 					{/if}
 				</div>
-				<div class="panel overflow-auto">
-					<div class="flex items-center justify-between">
-						<div class="panel-title">Row Mutation</div>
-						{#if tableName}
-							<span
-								class="rounded border px-2 py-1 text-xs {rowKeyColumns.length > 0
-									? 'border-emerald-300 bg-emerald-50 text-emerald-900'
-									: 'border-amber-300 bg-amber-50 text-amber-900'}"
-							>
-								{rowKeyLabel}
-							</span>
-						{/if}
-					</div>
-					<div class="grid grid-cols-3 gap-2">
-						<div>
-							<div class="mb-1 text-xs font-semibold text-zinc-500">insert row</div>
-							<textarea class="code-input h-28" bind:value={insertJson}></textarea>
-						</div>
-						<div>
-							<div class="mb-1 text-xs font-semibold text-zinc-500">where key</div>
-							<textarea class="code-input h-28" bind:value={rowJson}></textarea>
-						</div>
-						<div>
-							<div class="mb-1 text-xs font-semibold text-zinc-500">patch</div>
-							<textarea class="code-input h-28" bind:value={patchJson}></textarea>
-						</div>
-					</div>
-					<input
-						class="mt-2 w-full"
-						bind:value={deleteRowConfirmation}
-						placeholder={tableName ? `type ${tableName} to delete` : 'select table before deleting'}
-					/>
-					<div class="mt-2 flex flex-wrap gap-2">
-						<button class="command-button" onclick={applyInsertTemplate}>
-							<Copy class="size-4" /> Copy insert
-						</button>
-						<button
-							class="command-button"
-							onclick={insertRow}
-							disabled={!mutationsAllowed || !canOperate}><Plus class="size-4" /> Insert</button
-						>
-						<button
-							class="command-button"
-							onclick={updateRow}
-							disabled={!mutationsAllowed || !canOperate || rowKeyColumns.length === 0}
-							><Play class="size-4" /> Update</button
-						>
-						<button
-							class="danger-button"
-							onclick={deleteRow}
-							disabled={!mutationsAllowed ||
-								!canOperate ||
-								!tableName ||
-								rowKeyColumns.length === 0 ||
-								deleteRowConfirmation !== tableName}><Trash2 class="size-4" /> Delete</button
-						>
-					</div>
-				</div>
-			</div>
-			<div class="panel min-w-0 overflow-auto">
-				<div class="mb-3 flex items-center justify-between gap-2">
+			</Card.Header>
+			<Card.Content class="space-y-1 overflow-auto">
+				{#each tables as table (table.name)}
+					<Button
+						variant={tableName === table.name ? 'secondary' : 'ghost'}
+						class="w-full justify-between"
+						onclick={() => selectTable(table.name)}
+					>
+						<span class="truncate">{table.name}</span>
+						<span class="text-muted-foreground text-xs">{table.rows ?? 0}</span>
+					</Button>
+				{/each}
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root class="min-w-0">
+			<Card.Header>
+				<div class="flex items-center justify-between gap-3">
 					<div>
-						<div class="panel-title mb-1">Rows</div>
-						<div class="text-xs text-zinc-500">
+						<Card.Title>Rows</Card.Title>
+						<Card.Description>
 							{tableName || 'No table selected'} / offset {rowOffset}
 							{#if selectedTable?.rows !== undefined}
 								/ approx {selectedTable.rows} rows
 							{/if}
-						</div>
+						</Card.Description>
 					</div>
 					<div class="flex items-center gap-2">
-						<button
-							class="command-button compact"
-							onclick={previousPage}
-							disabled={!canPageBackward}
-						>
+						<Select.Root type="single" bind:value={rowLimitValue} onValueChange={updateRowLimit}>
+							<Select.Trigger aria-label="Row page size" class="w-[112px]">{rowLimit} rows</Select.Trigger>
+							<Select.Content>
+								{#each [50, 100, 250, 500] as size (size)}
+									<Select.Item value={String(size)}>{size} rows</Select.Item>
+								{/each}
+							</Select.Content>
+						</Select.Root>
+						<Button variant="outline" size="sm" onclick={() => loadTable()}>
+							<RefreshCw class="size-4" /> Reload
+						</Button>
+						<Button variant="outline" size="sm" onclick={previousPage} disabled={!canPageBackward}>
 							<ChevronLeft class="size-4" /> Prev
-						</button>
-						<button class="command-button compact" onclick={nextPage} disabled={!canPageForward}>
+						</Button>
+						<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>
 							Next <ChevronRight class="size-4" />
-						</button>
+						</Button>
 					</div>
 				</div>
-				<table class="data-table">
-					<thead>
-						<tr>
-							<th class="w-16">Select</th>
+			</Card.Header>
+			<Card.Content class="min-w-0 overflow-auto">
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
 							{#each displayFields as field (field)}
-								<th>{field}</th>
+								<Table.Head>{field}</Table.Head>
 							{/each}
-						</tr>
-					</thead>
-					<tbody>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
 						{#each rows as row, rowIndex (rowIndex)}
-							<tr
-								class={selectedRowKey === `${rowOffset}:${rowIndex}` ? 'selected-row' : ''}
-								onclick={() => selectRow(row, rowIndex)}
-							>
-								<td>
-									<button class="command-button compact" onclick={() => selectRow(row, rowIndex)}>
-										<Copy class="size-3" />
-									</button>
-								</td>
+							<Table.Row>
 								{#each displayFields as field (field)}
-									<td>{String(row[field] ?? '')}</td>
+									<Table.Cell>{String(row[field] ?? '')}</Table.Cell>
 								{/each}
-							</tr>
+							</Table.Row>
 						{/each}
-					</tbody>
-				</table>
+					</Table.Body>
+				</Table.Root>
 				{#if rows.length === 0}
-					<div
-						class="rounded border border-dashed border-zinc-300 px-3 py-6 text-center text-xs text-zinc-500"
-					>
+					<div class="text-muted-foreground mt-4 rounded-lg border border-dashed px-3 py-6 text-center text-sm">
 						No rows loaded for this table.
 					</div>
 				{/if}
-				{#if sqlResult}
-					<div class="mt-4 border-t border-zinc-200 pt-3 text-xs text-zinc-600">
-						SQL result: {sqlResult.executionMs}ms / {sqlResult.affectedRows ??
-							sqlResult.rows.length} rows / {sqlResult.policy.mode}
-						{#if sqlResult.limited}
-							<span class="text-amber-700"> / limited to {sqlResult.policy.maxRows}</span>
-						{/if}
-					</div>
-					{#if sqlResult.rows.length > 0}
-						<table class="data-table mt-2">
-							<thead>
-								<tr>
-									{#each sqlResult.fields as field (field)}
-										<th>{field}</th>
-									{/each}
-								</tr>
-							</thead>
-							<tbody>
-								{#each sqlResult.rows as row, rowIndex (rowIndex)}
-									<tr>
-										{#each sqlResult.fields as field (field)}
-											<td>{String(row[field] ?? '')}</td>
-										{/each}
-									</tr>
-								{/each}
-							</tbody>
-						</table>
-					{/if}
-				{/if}
-			</div>
+			</Card.Content>
+		</Card.Root>
 		</div>
-	</div>
+	{/if}
 </section>

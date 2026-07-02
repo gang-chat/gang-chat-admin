@@ -20,7 +20,9 @@ Thumbs.db
 !.env.test
 
 # Local ops runtime
+config.json
 .ops-data/
+.ai-admin-worker/
 .ops-dev*.log
 .ops-dev.pid
 .ops-api-smoke*.log

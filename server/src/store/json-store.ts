@@ -167,11 +167,16 @@ async function writeLockOwner(ownerFile: string) {
 }
 
 async function isStaleLock(lockDir: string, ownerFile: string, staleLockMs: number) {
-	const info = await stat(ownerFile).catch(async (error) => {
-		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-		return stat(lockDir);
-	});
-	return Date.now() - info.mtimeMs > staleLockMs;
+	try {
+		const info = await stat(ownerFile).catch(async (error) => {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+			return stat(lockDir);
+		});
+		return Date.now() - info.mtimeMs > staleLockMs;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+		throw error;
+	}
 }
 
 export function storePath(dataDir: string, name: string) {

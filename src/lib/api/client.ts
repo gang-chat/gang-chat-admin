@@ -1,19 +1,12 @@
 import type {
-	AgentJob,
-	AgentJobStatus,
-	AgentCommand,
 	ApiEnvelope,
+	AgentJob,
+	AgentOpsRun,
+	AgentOpsSession,
 	AgentWorkerStatus,
-	AuditEvent,
-	AuditExport,
-	AuditIntegrity,
-	AuditStatus,
 	AuthLoginResult,
 	AuthRole,
-	AuthSession,
 	AuthUser,
-	BackupPayload,
-	RestorePreview,
 	ConnectionInput,
 	ConnectionPreset,
 	ConnectionType,
@@ -24,7 +17,6 @@ import type {
 	MysqlQueryResult,
 	MysqlSqlPolicy,
 	MysqlTableSummary,
-	S3Bucket,
 	S3ObjectList,
 	S3ObjectMetadata,
 	SshActiveSession
@@ -75,51 +67,6 @@ export class ApiClient {
 
 	async logout() {
 		return this.request<{ revoked: boolean }>('/api/auth/logout', { method: 'POST' });
-	}
-
-	async authUsers() {
-		return this.get<AuthUser[]>('/api/auth/users');
-	}
-
-	async createAuthUser(input: {
-		username: string;
-		displayName?: string;
-		role: AuthRole;
-		password: string;
-	}) {
-		return this.request<AuthUser>('/api/auth/users', {
-			method: 'POST',
-			body: JSON.stringify(input)
-		});
-	}
-
-	async disableAuthUser(id: string, confirmation: string) {
-		await this.raw(`/api/auth/users/${id}`, {
-			method: 'DELETE',
-			headers: { 'x-ops-confirmation': confirmation }
-		});
-	}
-
-	async changePassword(input: {
-		currentPassword: string;
-		newPassword: string;
-		revokeOtherSessions: boolean;
-	}) {
-		return this.request<AuthUser>('/api/auth/password', {
-			method: 'POST',
-			body: JSON.stringify(input)
-		});
-	}
-
-	async authSessions() {
-		return this.get<AuthSession[]>('/api/auth/sessions');
-	}
-
-	async revokeAuthSession(id: string, confirmation: string) {
-		return this.request<AuthSession>(`/api/auth/sessions/${id}`, {
-			method: 'DELETE',
-			headers: { 'x-ops-confirmation': confirmation }
-		});
 	}
 
 	async connections(type?: ConnectionType) {
@@ -201,10 +148,6 @@ export class ApiClient {
 			method: 'POST',
 			body: JSON.stringify({ sql, ...policy })
 		});
-	}
-
-	async s3Buckets(id: string) {
-		return this.get<S3Bucket[]>(`/api/s3/${id}/buckets`);
 	}
 
 	async s3Objects(
@@ -300,63 +243,55 @@ export class ApiClient {
 		});
 	}
 
-	async agentJobs(status?: AgentJobStatus) {
-		return this.get<AgentJob[]>(`/api/agent/jobs${status ? `?status=${status}` : ''}`);
-	}
-
 	async agentWorkers() {
 		return this.get<AgentWorkerStatus[]>('/api/agent/workers');
 	}
 
-	async approveAgentJob(id: string, operatorNote?: string, commands?: AgentCommand[]) {
-		return this.request<AgentJob>(`/api/agent/jobs/${id}/approve`, {
+	async agentSessions(workerId: string) {
+		return this.get<AgentOpsSession[]>(
+			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions`
+		);
+	}
+
+	async createAgentSession(workerId: string, input: { name?: string }) {
+		return this.request<AgentOpsSession>(
+			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions`,
+			{
+				method: 'POST',
+				body: JSON.stringify(input)
+			}
+		);
+	}
+
+	async agentSessionRuns(workerId: string, sessionId: string) {
+		return this.get<AgentOpsRun[]>(
+			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions/${encodeURIComponent(sessionId)}/runs`
+		);
+	}
+
+	async deleteAgentSession(workerId: string, sessionId: string) {
+		return this.request<{ deleted: boolean }>(
+			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions/${encodeURIComponent(sessionId)}`,
+			{ method: 'DELETE' }
+		);
+	}
+
+	async agentWorkerTerminalTicket(workerId: string) {
+		return this.request<{ ticket: string; expiresAt: string }>(
+			`/api/agent/workers/${encodeURIComponent(workerId)}/terminal/ticket`,
+			{ method: 'POST' }
+		);
+	}
+
+	async agentRun(input: { workerId: string; sessionId: string; goal: string }) {
+		return this.request<AgentOpsRun>('/api/agent/run', {
 			method: 'POST',
-			body: JSON.stringify({ operatorNote, commands })
+			body: JSON.stringify(input)
 		});
 	}
 
-	async rejectAgentJob(id: string, operatorNote?: string) {
-		return this.request<AgentJob>(`/api/agent/jobs/${id}/reject`, {
-			method: 'POST',
-			body: JSON.stringify({ operatorNote })
-		});
-	}
-
-	async audit(
-		options: { limit?: number; status?: AuditStatus; action?: string; target?: string } = {}
-	) {
-		const params = new URLSearchParams();
-		params.set('limit', String(options.limit ?? 100));
-		if (options.status) params.set('status', options.status);
-		if (options.action) params.set('action', options.action);
-		if (options.target) params.set('target', options.target);
-		return this.get<AuditEvent[]>(`/api/audit?${params.toString()}`);
-	}
-
-	async auditIntegrity() {
-		return this.get<AuditIntegrity>('/api/audit/integrity');
-	}
-
-	async exportAudit() {
-		return this.get<AuditExport>('/api/audit/export');
-	}
-
-	async exportBackup() {
-		return this.get<BackupPayload>('/api/admin/backup');
-	}
-
-	async restoreBackup(backup: BackupPayload, confirmation: 'RESTORE') {
-		return this.request<{ restored: boolean }>('/api/admin/restore', {
-			method: 'POST',
-			body: JSON.stringify({ backup, confirmation })
-		});
-	}
-
-	async previewRestoreBackup(backup: BackupPayload) {
-		return this.request<RestorePreview>('/api/admin/restore/preview', {
-			method: 'POST',
-			body: JSON.stringify({ backup })
-		});
+	async agentRunStatus(id: string) {
+		return this.get<AgentOpsRun>(`/api/agent/runs/${id}`);
 	}
 
 	private async get<T>(path: string, auth = true) {
@@ -377,7 +312,9 @@ export class ApiClient {
 		const headers = new Headers(init.headers);
 		if (auth) headers.set('Authorization', `Bearer ${this.token}`);
 		if (auth && this.actor.trim()) headers.set('x-ops-actor', this.actor.trim());
-		if (init.json !== false) headers.set('content-type', 'application/json');
+		if (init.json !== false && init.body != null && !headers.has('content-type')) {
+			headers.set('content-type', 'application/json');
+		}
 		const response = await fetch(`${this.baseUrl}${path}`, { ...init, headers });
 		if (!response.ok) {
 			throw await toApiError(response);

@@ -131,11 +131,6 @@ export type MysqlQueryResult = {
 	policy: MysqlSqlPolicy;
 };
 
-export type S3Bucket = {
-	name: string;
-	createdAt?: string;
-};
-
 export type S3ObjectSummary = {
 	key: string;
 	size: number;
@@ -215,20 +210,6 @@ export type AuditIntegrity = {
 	reason?: string;
 };
 
-export type AuditExport = {
-	version: 1;
-	exportedAt: string;
-	checkpoint: {
-		headHash?: string;
-		total: number;
-		signed: number;
-		unsigned: number;
-		valid: boolean;
-	};
-	integrity: AuditIntegrity;
-	events: AuditEvent[];
-};
-
 export type AgentCommand = {
 	label: string;
 	command: string;
@@ -249,6 +230,13 @@ export type AgentJobStatus = 'suggested' | 'approved' | 'rejected';
 
 export type AgentExecutionStatus = 'queued' | 'running' | 'completed' | 'failed';
 
+export type AgentWorkerTerminalStatus = {
+	available: boolean;
+	username?: string;
+	shell?: string;
+	cwd?: string;
+};
+
 export type AgentWorkerStatus = {
 	id: string;
 	lastSeenAt: string;
@@ -258,6 +246,9 @@ export type AgentWorkerStatus = {
 	execute: boolean;
 	allowedCommands: string[];
 	currentJobId?: string;
+	transport?: 'poll' | 'websocket';
+	connected?: boolean;
+	terminal?: AgentWorkerTerminalStatus;
 };
 
 export type AgentCommandResult = {
@@ -288,33 +279,33 @@ export type AgentJob = AgentSuggestion & {
 	commandResults?: AgentCommandResult[];
 };
 
-export type BackupPayload = {
-	version: 1;
-	exportedAt: string;
-	data: {
-		connections: unknown;
-		audit: unknown;
-		expenses: unknown;
-		agent?: unknown;
-		auth?: unknown;
-	};
+export type AgentRunEvent = {
+	type: 'status' | 'text' | 'tool' | 'compact' | 'done' | 'error';
+	message: string;
+	at: string;
 };
 
-export type BackupStoreSummary = {
-	connections: number;
-	auditEvents: number;
-	expenseEntries: number;
-	agentJobs: number;
-	authUsers: number;
-	authSessions: number;
+export type AgentOpsSession = {
+	id: string;
+	workerId: string;
+	name: string;
+	titleSource?: 'auto' | 'custom';
+	createdAt: string;
+	updatedAt: string;
+	lastRunId?: string;
 };
 
-export type RestorePreview = {
-	version: 1;
-	exportedAt: string;
-	incoming: BackupStoreSummary;
-	current: BackupStoreSummary;
-	missingStores: string[];
+export type AgentOpsRun = {
+	id: string;
+	workerId: string;
+	sessionId: string;
+	createdAt: string;
+	updatedAt: string;
+	goal: string;
+	status: 'queued' | 'running' | 'completed' | 'failed';
+	result?: string;
+	error?: string;
+	events: AgentRunEvent[];
 };
 
 export type ApiEnvelope<T> = {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { ServerEnv } from '../../config/env';
+import type { ServerConfig } from '../../config/config';
 import { requireRole } from '../../core/access-control';
 import { ok, requireAgentWorkerAuth } from '../../core/http';
 import { idParamSchema, parseInput } from '../../core/validation';
@@ -7,18 +7,28 @@ import type { AuditRepository } from '../audit/audit.repository';
 import {
 	agentDecisionBodySchema,
 	agentJobsQuerySchema,
+	agentOpsRunBodySchema,
+	agentOpsSessionBodySchema,
+	agentSessionParamSchema,
 	agentSuggestBodySchema,
 	agentWorkerCompleteBodySchema,
 	agentWorkerFailBodySchema,
 	agentWorkerHeartbeatBodySchema,
 	agentWorkerJobsQuerySchema,
+	agentWorkerParamSchema,
 	agentWorkerStartBodySchema
 } from './agent.schema';
 import type { AgentService } from './agent.service';
+import type { AiAdminWorkerHub } from './ai-admin-worker-hub';
 
 export async function registerAgentRoutes(
 	app: FastifyInstance,
-	deps: { env: ServerEnv; agent: AgentService; audit: AuditRepository }
+	deps: {
+		env: ServerConfig;
+		agent: AgentService;
+		audit: AuditRepository;
+		aiAdminWorkerHub: AiAdminWorkerHub;
+	}
 ) {
 	app.get('/api/agent/jobs', async (request) => {
 		const query = parseInput(agentJobsQuerySchema, request.query);
@@ -28,6 +38,58 @@ export async function registerAgentRoutes(
 	app.get('/api/agent/workers', async (request) => {
 		requireRole(request, 'operator');
 		return ok(await deps.agent.listWorkers());
+	});
+
+	app.get('/api/agent/workers/:workerId/sessions', async (request) => {
+		requireRole(request, 'operator');
+		const { workerId } = parseInput(agentWorkerParamSchema, request.params);
+		return ok(await deps.agent.listWorkerSessions(workerId));
+	});
+
+	app.post('/api/agent/workers/:workerId/sessions', async (request) => {
+		requireRole(request, 'operator');
+		const { workerId } = parseInput(agentWorkerParamSchema, request.params);
+		const body = parseInput(agentOpsSessionBodySchema, request.body);
+		const session = await deps.agent.createWorkerSession(workerId, body.name);
+		await deps.audit.record({
+			action: 'agent.ops.session.create',
+			target: session.id,
+			status: 'ok',
+			detail: `${session.workerId}: ${session.name}`
+		});
+		return ok(session);
+	});
+
+	app.get('/api/agent/workers/:workerId/sessions/:sessionId/runs', async (request) => {
+		requireRole(request, 'operator');
+		const { workerId, sessionId } = parseInput(agentSessionParamSchema, request.params);
+		return ok(await deps.agent.listSessionRuns(workerId, sessionId));
+	});
+
+	app.delete('/api/agent/workers/:workerId/sessions/:sessionId', async (request) => {
+		requireRole(request, 'operator');
+		const { workerId, sessionId } = parseInput(agentSessionParamSchema, request.params);
+		const result = await deps.agent.deleteWorkerSession(workerId, sessionId);
+		await deps.audit.record({
+			action: 'agent.ops.session.delete',
+			target: sessionId,
+			status: 'ok',
+			detail: workerId
+		});
+		return ok(result);
+	});
+
+	app.post('/api/agent/workers/:workerId/terminal/ticket', async (request) => {
+		requireRole(request, 'operator');
+		const { workerId } = parseInput(agentWorkerParamSchema, request.params);
+		const ticket = deps.aiAdminWorkerHub.createTerminalTicket(workerId);
+		await deps.audit.record({
+			action: 'agent.worker.terminal.ticket',
+			target: workerId,
+			status: 'ok',
+			detail: ticket.expiresAt
+		});
+		return ok(ticket);
 	});
 
 	app.post('/api/agent/suggest', async (request) => {
@@ -41,6 +103,25 @@ export async function registerAgentRoutes(
 			detail: job.goal
 		});
 		return ok(job);
+	});
+
+	app.post('/api/agent/run', async (request) => {
+		requireRole(request, 'operator');
+		const body = parseInput(agentOpsRunBodySchema, request.body);
+		const run = await deps.agent.runOpsPrompt(body.workerId, body.sessionId, body.goal);
+		await deps.audit.record({
+			action: 'agent.ops.run',
+			target: run.id,
+			status: run.status === 'completed' ? 'ok' : run.status === 'failed' ? 'failed' : 'pending',
+			detail: run.goal
+		});
+		return ok(run);
+	});
+
+	app.get('/api/agent/runs/:id', async (request) => {
+		requireRole(request, 'operator');
+		const { id } = parseInput(idParamSchema, request.params);
+		return ok(await deps.agent.getOpsRun(id));
 	});
 
 	app.post('/api/agent/jobs/:id/approve', async (request) => {

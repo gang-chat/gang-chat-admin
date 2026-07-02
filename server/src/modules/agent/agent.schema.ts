@@ -5,6 +5,25 @@ export const agentSuggestBodySchema = z.object({
 	context: z.string().trim().max(20_000).optional()
 });
 
+export const agentOpsRunBodySchema = z.object({
+	workerId: z.string().trim().min(1).max(120),
+	sessionId: z.string().trim().min(1).max(120),
+	goal: z.string().trim().min(1).max(2000)
+});
+
+export const agentOpsSessionBodySchema = z.object({
+	name: z.string().trim().min(1).max(120).optional()
+});
+
+export const agentWorkerParamSchema = z.object({
+	workerId: z.string().trim().min(1).max(120)
+});
+
+export const agentSessionParamSchema = z.object({
+	workerId: z.string().trim().min(1).max(120),
+	sessionId: z.string().trim().min(1).max(120)
+});
+
 export const agentJobsQuerySchema = z.object({
 	status: z.enum(['suggested', 'approved', 'rejected']).optional()
 });

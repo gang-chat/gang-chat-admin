@@ -6,7 +6,7 @@ import type {
 	SshPublicConfig,
 	SshSessionStatus
 } from '../../../../src/lib/shared/ops-types';
-import type { ServerEnv } from '../../config/env';
+import type { ServerConfig } from '../../config/config';
 import { requireRole } from '../../core/access-control';
 import { HttpError, ok, requireConfirmation } from '../../core/http';
 import { idParamSchema, parseInput } from '../../core/validation';
@@ -43,7 +43,7 @@ const MAX_ROWS = 120;
 export async function registerSshRoutes(
 	app: FastifyInstance,
 	deps: {
-		env: ServerEnv;
+		env: ServerConfig;
 		connections: ConnectionsRepository;
 		audit: AuditRepository;
 	}

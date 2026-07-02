@@ -17,7 +17,7 @@ async function withStore(fn: (store: JsonStore<CounterState>, filePath: string) 
 	try {
 		await fn(new JsonStore(filePath, { count: 0, items: [] }), filePath);
 	} finally {
-		await rm(dir, { recursive: true, force: true });
+		await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
 	}
 }
 

@@ -37,7 +37,7 @@ type AuthState = {
 export type AuthIdentity = {
 	userId?: string;
 	actor: string;
-	authMethod: 'session' | 'legacy-token';
+	authMethod: 'session';
 	role: AuthRole;
 };
 
@@ -62,11 +62,20 @@ export class AuthService {
 	async initialize() {
 		if (!this.options.username || !this.options.password) return;
 		await this.store.update(async (state) => {
-			if (state.users.length > 0) return;
 			const now = new Date().toISOString();
+			const username = normalizeUsername(this.options.username!);
+			const existing = state.users.find((user) => user.username === username);
+			if (existing) {
+				existing.displayName = this.options.username!;
+				existing.role = 'admin';
+				existing.disabled = false;
+				existing.passwordHash = await hashPassword(this.options.password!);
+				existing.updatedAt = now;
+				return;
+			}
 			state.users.push({
 				id: nanoid(),
-				username: normalizeUsername(this.options.username!),
+				username,
 				displayName: this.options.username!,
 				role: 'admin',
 				disabled: false,

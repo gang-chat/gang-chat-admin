@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import type { AuditEvent, AuditExport, AuditIntegrity } from '../../../../src/lib/shared/ops-types';
+import type { AuditEvent, AuditIntegrity } from '../../../../src/lib/shared/ops-types';
 import { currentActor } from '../../core/request-context';
 import { JsonStore, storePath } from '../../store/json-store';
 
@@ -40,24 +40,6 @@ export class AuditRepository {
 	async integrity(): Promise<AuditIntegrity> {
 		const state = await this.store.read();
 		return verifyIntegrity(this.signingKey, state.events);
-	}
-
-	async exportLog(): Promise<AuditExport> {
-		const state = await this.store.read();
-		const integrity = verifyIntegrity(this.signingKey, state.events);
-		return {
-			version: 1,
-			exportedAt: new Date().toISOString(),
-			checkpoint: {
-				headHash: integrity.headHash,
-				total: integrity.total,
-				signed: integrity.signed,
-				unsigned: integrity.unsigned,
-				valid: integrity.valid
-			},
-			integrity,
-			events: state.events
-		};
 	}
 
 	async record(

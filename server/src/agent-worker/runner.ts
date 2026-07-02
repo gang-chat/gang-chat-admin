@@ -27,7 +27,7 @@ export async function runAgentJob(
 	if (!options.execute) {
 		return {
 			success: true,
-			result: `Dry-run: ${job.commands.length} command(s) approved but not executed. Set OPS_AGENT_WORKER_EXECUTE=true to run commands.`,
+			result: `Dry-run: ${job.commands.length} command(s) approved but not executed. Set execute=true in the worker config to run commands.`,
 			commandResults: job.commands.map((command) => ({
 				label: command.label,
 				command: command.command,
@@ -128,16 +128,20 @@ export function validateCommandPolicy(command: string, policy?: AgentWorkerComma
 	if (!trimmed) return 'Command is empty';
 	if (trimmed.length > 20_000) return 'Command is too long';
 	if (hasControlCharacter(trimmed)) return 'Command contains control characters';
+
+	const allowedCommands = policy?.allowedCommands ?? [];
+	if (allowedCommands.length === 0) {
+		return 'Worker execution allowlist is empty';
+	}
+	const normalizedAllowedCommands = allowedCommands.map((item) => item.toLowerCase());
+	if (normalizedAllowedCommands.includes('*')) return '';
+
 	if (/[;&|<>`]/.test(trimmed) || /\$\s*\(/.test(trimmed)) {
 		return 'Command uses shell chaining, redirection or command substitution';
 	}
 
 	const executable = firstToken(trimmed).toLowerCase();
-	const allowedCommands = policy?.allowedCommands ?? [];
-	if (allowedCommands.length === 0) {
-		return 'Worker execution allowlist is empty';
-	}
-	if (!allowedCommands.map((item) => item.toLowerCase()).includes(executable)) {
+	if (!normalizedAllowedCommands.includes(executable)) {
 		return `Executable is not allowed by this worker: ${executable}`;
 	}
 	return '';

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuthRole } from '../../../src/lib/shared/ops-types';
-import type { ServerEnv } from '../config/env';
+import type { ServerConfig } from '../config/config';
 
 export class HttpError extends Error {
 	constructor(
@@ -24,7 +24,7 @@ export function bearerToken(request: FastifyRequest) {
 
 export type AdminAuthResult = {
 	actor: string;
-	authMethod: 'legacy-token' | 'session';
+	authMethod: 'session';
 	role: AuthRole;
 	userId?: string;
 };
@@ -36,18 +36,17 @@ declare module 'fastify' {
 }
 
 export async function requireAuth(
-	env: ServerEnv,
+	_env: ServerConfig,
 	request: FastifyRequest,
 	validateSession?: (token: string | undefined) => Promise<AdminAuthResult | undefined>
 ): Promise<AdminAuthResult> {
 	const token = bearerToken(request);
-	if (token === env.apiToken) return { actor: 'admin', authMethod: 'legacy-token', role: 'admin' };
 	const session = await validateSession?.(token);
 	if (session) return session;
-	throw new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid admin token');
+	throw new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid session token');
 }
 
-export function requireAgentWorkerAuth(env: ServerEnv, request: FastifyRequest) {
+export function requireAgentWorkerAuth(env: ServerConfig, request: FastifyRequest) {
 	const token = bearerToken(request);
 	if (token !== env.agentWorkerToken) {
 		throw new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid agent worker token');

@@ -1,20 +1,21 @@
 <script lang="ts">
 	import { Eraser, Plug, PlugZap, RotateCw } from '@lucide/svelte';
 	import { onDestroy, onMount } from 'svelte';
+	import { Button } from '$lib/components/ui/button';
 	import type { ApiClient } from '$lib/api/client';
 
 	let {
 		api,
-		connectionId,
-		wsBase,
+		workerId,
 		title,
-		canOperate
+		canOperate,
+		attachedTop = false
 	}: {
 		api: ApiClient;
-		connectionId?: string;
-		wsBase: string;
+		workerId?: string;
 		title: string;
 		canOperate: boolean;
+		attachedTop?: boolean;
 	} = $props();
 
 	type TerminalStatus = 'idle' | 'ready' | 'connecting' | 'connected' | 'closed' | 'error';
@@ -38,6 +39,9 @@
 	let resizeObserver: ResizeObserver | undefined;
 	let dataSubscription: { dispose: () => void } | undefined;
 	let heartbeat: ReturnType<typeof setInterval> | undefined;
+	let previousWorkerId = $state<string | undefined>();
+	let hasWorkerSnapshot = $state(false);
+	let localEcho = false;
 
 	onMount(async () => {
 		const [{ Terminal }, { FitAddon }] = await Promise.all([
@@ -68,6 +72,7 @@
 		fitAddon = fit;
 		dataSubscription = term.onData((data) => {
 			if (socket?.readyState === WebSocket.OPEN) {
+				if (localEcho) echoTerminalInput(data);
 				socket.send(JSON.stringify({ type: 'input', data }));
 			}
 		});
@@ -77,32 +82,35 @@
 		});
 		resizeObserver.observe(host);
 
-		if (!connectionId) {
-			status = 'idle';
-			statusText = 'select preset';
-			term.write('Select an SSH preset to start a session.\r\n');
+		writeIdleMessage();
+	});
+
+	$effect(() => {
+		const currentWorkerId = workerId;
+		if (!hasWorkerSnapshot) {
+			hasWorkerSnapshot = true;
+			previousWorkerId = currentWorkerId;
 			return;
 		}
-
-		status = 'ready';
-		statusText = 'ready';
-		term.write('Press Connect to start a session.\r\n');
+		if (previousWorkerId === currentWorkerId) return;
+		previousWorkerId = currentWorkerId;
+		disconnect();
+		terminal?.clear();
+		writeIdleMessage();
 	});
 
 	async function connect() {
-		if (!connectionId || !terminal || connecting || socket?.readyState === WebSocket.OPEN) return;
+		if (!workerId || !terminal || connecting || socket?.readyState === WebSocket.OPEN) return;
 		connecting = true;
 		status = 'connecting';
 		statusText = 'connecting';
 		fitAddon?.fit();
 		terminal.write(`\r\n[${title}] connecting...\r\n`);
 		try {
-			const { ticket } = await api.sshTicket(connectionId);
+			const { ticket } = await api.agentWorkerTerminalTicket(workerId);
 			const cols = terminal.cols || 120;
 			const rows = terminal.rows || 32;
-			const activeSocket = new WebSocket(
-				`${wsBase}/ws/ssh/${connectionId}?ticket=${ticket}&cols=${cols}&rows=${rows}`
-			);
+			const activeSocket = new WebSocket(workerTerminalSocketUrl(workerId, ticket, cols, rows));
 			socket = activeSocket;
 			wireSocket(activeSocket);
 		} catch (error) {
@@ -133,12 +141,16 @@
 			if (payload.type === 'error') {
 				status = 'error';
 				statusText = 'error';
-				terminal?.write(`\r\n[error] ${payload.message ?? 'SSH error'}\r\n`);
+				terminal?.write(`\r\n[error] ${payload.message ?? 'Terminal error'}\r\n`);
 			}
 			if (payload.type === 'status') {
 				statusText = payload.status ?? statusText;
 				if (payload.status === 'connected') status = 'connected';
-				if (payload.status === 'closed') status = 'closed';
+				if (payload.status === 'connected') localEcho = payload.message === 'pipe';
+				if (payload.status === 'closed') {
+					status = 'closed';
+					localEcho = false;
+				}
 			}
 		});
 		activeSocket.addEventListener('close', () => {
@@ -146,6 +158,7 @@
 			if (socket === activeSocket) socket = undefined;
 			status = 'closed';
 			statusText = 'closed';
+			localEcho = false;
 			terminal?.write('\r\n[session closed]\r\n');
 		});
 		activeSocket.addEventListener('error', () => {
@@ -159,10 +172,23 @@
 		clearHeartbeat();
 		socket?.close(1000, 'Closed by operator');
 		socket = undefined;
+		localEcho = false;
 		if (status !== 'idle') {
 			status = 'closed';
 			statusText = 'closed';
 		}
+	}
+
+	function workerTerminalSocketUrl(workerId: string, ticket: string, cols: number, rows: number) {
+		const url = new URL(
+			`/ws/agent/workers/${encodeURIComponent(workerId)}/terminal`,
+			window.location.href
+		);
+		url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+		url.searchParams.set('ticket', ticket);
+		url.searchParams.set('cols', String(cols));
+		url.searchParams.set('rows', String(rows));
+		return url;
 	}
 
 	async function reconnect() {
@@ -178,6 +204,38 @@
 	function sendResize() {
 		if (!terminal || socket?.readyState !== WebSocket.OPEN) return;
 		socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+	}
+
+	function echoTerminalInput(data: string) {
+		if (!terminal || data.startsWith('\x1b')) return;
+		if (data === '\r') {
+			terminal.write('\r\n');
+			return;
+		}
+		if (data === '\x7f') {
+			terminal.write('\b \b');
+			return;
+		}
+		if (data === '\x03') {
+			terminal.write('^C\r\n');
+			return;
+		}
+		terminal.write(data);
+	}
+
+	function writeIdleMessage() {
+		if (!terminal) return;
+		if (!workerId) {
+			status = 'idle';
+			statusText = 'select worker';
+			localEcho = false;
+			terminal.write('Select a worker to start a terminal.\r\n');
+			return;
+		}
+		status = 'ready';
+		statusText = 'ready';
+		localEcho = false;
+		terminal.write('Press Connect to start a terminal.\r\n');
 	}
 
 	function clearHeartbeat() {
@@ -208,7 +266,9 @@
 </script>
 
 <section
-	class="flex min-h-0 flex-col overflow-hidden rounded-md border border-zinc-800 bg-[#080b0f]"
+	class="flex min-h-0 flex-col overflow-hidden border border-zinc-800 bg-[#080b0f] {attachedTop
+		? 'rounded-b-xl'
+		: 'rounded-md'}"
 >
 	<header class="flex h-9 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3">
 		<div class="truncate text-xs font-medium text-zinc-200">{title}</div>
@@ -224,51 +284,45 @@
 			>
 				{statusText}
 			</span>
-			<button
-				class="terminal-button"
+			<Button
+				variant="outline"
+				size="icon-xs"
+				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
 				title="Connect"
 				onclick={connect}
-				disabled={!connectionId || !canOperate || connecting}
+				disabled={!workerId || !canOperate || connecting}
 			>
 				<Plug class="size-3" />
-			</button>
-			<button
-				class="terminal-button"
+			</Button>
+			<Button
+				variant="outline"
+				size="icon-xs"
+				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
 				title="Reconnect"
 				onclick={reconnect}
-				disabled={!connectionId || !canOperate}
+				disabled={!workerId || !canOperate}
 			>
 				<RotateCw class="size-3" />
-			</button>
-			<button class="terminal-button" title="Disconnect" onclick={disconnect}>
+			</Button>
+			<Button
+				variant="outline"
+				size="icon-xs"
+				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
+				title="Disconnect"
+				onclick={disconnect}
+			>
 				<PlugZap class="size-3" />
-			</button>
-			<button class="terminal-button" title="Clear" onclick={clearTerminal}>
+			</Button>
+			<Button
+				variant="outline"
+				size="icon-xs"
+				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
+				title="Clear"
+				onclick={clearTerminal}
+			>
 				<Eraser class="size-3" />
-			</button>
+			</Button>
 		</div>
 	</header>
 	<div bind:this={host} class="min-h-0 flex-1 overflow-hidden"></div>
 </section>
-
-<style>
-	.terminal-button {
-		display: inline-flex;
-		height: 1.35rem;
-		width: 1.35rem;
-		align-items: center;
-		justify-content: center;
-		border-radius: 4px;
-		border: 1px solid rgb(39 39 42);
-		color: rgb(212 212 216);
-	}
-
-	.terminal-button:hover {
-		background: rgb(39 39 42);
-	}
-
-	.terminal-button:disabled {
-		cursor: not-allowed;
-		opacity: 0.4;
-	}
-</style>

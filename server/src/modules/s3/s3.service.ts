@@ -3,18 +3,12 @@ import {
 	DeleteObjectCommand,
 	GetObjectCommand,
 	HeadObjectCommand,
-	ListBucketsCommand,
 	ListObjectsV2Command,
 	S3Client
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import type { FastifyRequest } from 'fastify';
-import type {
-	S3Bucket,
-	S3ObjectList,
-	S3ObjectMetadata,
-	S3PublicConfig
-} from '../../../../src/lib/shared/ops-types';
+import type { S3ObjectList, S3ObjectMetadata, S3PublicConfig } from '../../../../src/lib/shared/ops-types';
 import { HttpError } from '../../core/http';
 import { parseInput } from '../../core/validation';
 import type { ConnectionsRepository } from '../connections/connections.repository';
@@ -28,15 +22,6 @@ type S3Secret = {
 
 export class S3Service {
 	constructor(private readonly connections: ConnectionsRepository) {}
-
-	async listBuckets(connectionId: string): Promise<S3Bucket[]> {
-		const client = await this.client(connectionId);
-		const result = await client.send(new ListBucketsCommand({}));
-		return (result.Buckets ?? []).map((bucket) => ({
-			name: bucket.Name ?? '',
-			createdAt: bucket.CreationDate?.toISOString()
-		}));
-	}
 
 	async listObjects(
 		connectionId: string,
@@ -190,7 +175,15 @@ export class S3Service {
 	}
 
 	async test(connectionId: string) {
-		await this.listBuckets(connectionId);
+		const preset = await this.connections.get(connectionId);
+		if (preset.type !== 's3') {
+			throw new HttpError(400, 'WRONG_CONNECTION_TYPE', 'Connection preset is not S3');
+		}
+		const config = preset.config as S3PublicConfig;
+		if (!config.defaultBucket) {
+			throw new HttpError(400, 'S3_BUCKET_NOT_CONFIGURED', 'S3 default bucket is not configured');
+		}
+		await this.listObjects(connectionId, config.defaultBucket, '', { maxKeys: 1 });
 	}
 
 	async assertWritesAllowed(connectionId: string) {

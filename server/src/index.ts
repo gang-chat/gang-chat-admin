@@ -1,15 +1,12 @@
 import { buildApp } from './app';
-import { loadEnv } from './config/env';
+import { loadConfig } from './config/config';
 
-const env = await loadEnv();
-const app = await buildApp(env);
+const config = await loadConfig();
+const app = await buildApp(config);
 
 try {
-	await app.listen({ host: env.host, port: env.port });
-	app.log.info(`Ops API listening on http://${env.host}:${env.port}`);
-	if (env.nodeEnv !== 'production' && env.apiToken === 'dev-admin-token') {
-		app.log.warn('Using development admin token: dev-admin-token');
-	}
+	await app.listen({ host: config.host, port: config.port });
+	app.log.info(`Ops API listening on http://${config.host}:${config.port}`);
 } catch (error) {
 	app.log.error(error);
 	process.exit(1);

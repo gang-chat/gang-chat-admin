@@ -1,9 +1,9 @@
 import os from 'node:os';
 import { AgentWorkerClient } from './client';
-import { loadAgentWorkerEnv } from './config';
+import { loadAgentWorkerConfig } from './config';
 import { runAgentJob } from './runner';
 
-const env = loadAgentWorkerEnv();
+const env = await loadAgentWorkerConfig();
 const client = new AgentWorkerClient(env.apiBase, env.token);
 let stopping = false;
 
@@ -73,7 +73,7 @@ async function heartbeat(currentJobId?: string) {
 		workerId: env.workerId,
 		apiBase: env.apiBase,
 		hostname: os.hostname(),
-		version: process.env.npm_package_version,
+		version: undefined,
 		execute: env.execute,
 		allowedCommands: env.allowedCommands,
 		currentJobId

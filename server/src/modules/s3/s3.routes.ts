@@ -16,11 +16,6 @@ export async function registerS3Routes(
 	app: FastifyInstance,
 	deps: { s3: S3Service; audit: AuditRepository }
 ) {
-	app.get('/api/s3/:id/buckets', async (request) => {
-		const { id } = parseInput(idParamSchema, request.params);
-		return ok(await deps.s3.listBuckets(id));
-	});
-
 	app.get('/api/s3/:id/objects', async (request) => {
 		const { id } = parseInput(idParamSchema, request.params);
 		const query = parseInput(s3ObjectQuerySchema, request.query);
