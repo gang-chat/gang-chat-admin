@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { Bot, Check, RefreshCw, X } from '@lucide/svelte';
+	import { Bot, Check, Plus, RefreshCw, Trash2, X } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import type { ApiClient } from '$lib/api/client';
-	import type { AgentJob, AgentJobStatus, AuthRole } from '$lib/shared/ops-types';
+	import type { AgentCommand, AgentJob, AgentJobStatus, AuthRole } from '$lib/shared/ops-types';
 	import type { RunTask } from './types';
 
 	let {
@@ -23,10 +23,22 @@
 	let context = $state('');
 	let jobs = $state<AgentJob[]>([]);
 	let selectedJobId = $state('');
+	let commandDraftJobId = $state('');
+	let commandDrafts = $state<AgentCommand[]>([]);
 	let statusFilter = $state<StatusFilter>('all');
 	let operatorNote = $state('');
 	let selectedJob = $derived(jobs.find((job) => job.id === selectedJobId) ?? jobs[0]);
 	let canOperate = $derived(currentRole === 'operator' || currentRole === 'admin');
+	let commandDraftError = $derived(validateCommandDrafts(commandDrafts));
+	let canApprove = $derived(
+		Boolean(
+			canOperate &&
+			selectedJob &&
+			selectedJob.status === 'suggested' &&
+			commandDraftJobId === selectedJob.id &&
+			!commandDraftError
+		)
+	);
 
 	onMount(() => {
 		void loadJobs();
@@ -47,13 +59,15 @@
 		await run(async () => {
 			jobs = await api.agentJobs(statusFilter === 'all' ? undefined : statusFilter);
 			if (selectedJobId && !jobs.some((job) => job.id === selectedJobId)) selectedJobId = '';
+			if (!selectedJobId && jobs[0]) selectJob(jobs[0]);
+			else if (selectedJob && commandDraftJobId !== selectedJob.id) resetCommandDrafts(selectedJob);
 		});
 	}
 
 	async function approveJob() {
 		if (!selectedJob) return;
 		await run(async () => {
-			const job = await api.approveAgentJob(selectedJob.id, operatorNote);
+			const job = await api.approveAgentJob(selectedJob.id, operatorNote, commandDrafts);
 			selectedJobId = job.id;
 			operatorNote = '';
 			await loadJobs();
@@ -70,6 +84,39 @@
 			await loadJobs();
 			await onAuditRefresh();
 		}, 'Agent job rejected');
+	}
+
+	function selectJob(job: AgentJob) {
+		selectedJobId = job.id;
+		resetCommandDrafts(job);
+	}
+
+	function resetCommandDrafts(job: AgentJob) {
+		commandDraftJobId = job.id;
+		commandDrafts = job.commands.map((command) => ({ ...command }));
+	}
+
+	function addCommandDraft() {
+		commandDrafts = [
+			...commandDrafts,
+			{ label: 'New command', command: '', requiresApproval: true }
+		];
+	}
+
+	function removeCommandDraft(index: number) {
+		commandDrafts = commandDrafts.filter((_, itemIndex) => itemIndex !== index);
+	}
+
+	function validateCommandDrafts(commands: AgentCommand[]) {
+		if (commands.length === 0) return 'At least one command is required for approval.';
+		if (commands.length > 50) return 'No more than 50 commands can be approved.';
+		for (const [index, command] of commands.entries()) {
+			if (!command.label.trim()) return `Command ${index + 1} needs a label.`;
+			if (command.label.length > 200) return `Command ${index + 1} label is too long.`;
+			if (!command.command.trim()) return `Command ${index + 1} is empty.`;
+			if (command.command.length > 20_000) return `Command ${index + 1} is too long.`;
+		}
+		return '';
 	}
 </script>
 
@@ -105,7 +152,7 @@
 					{#each jobs as job (job.id)}
 						<button
 							class="list-row {selectedJob?.id === job.id ? 'active' : ''}"
-							onclick={() => (selectedJobId = job.id)}
+							onclick={() => selectJob(job)}
 						>
 							<span class="truncate">{job.goal}</span>
 							<span>{job.executionStatus ?? job.status}</span>
@@ -151,18 +198,58 @@
 				</div>
 
 				<div class="mt-4 space-y-2">
-					{#each selectedJob.commands as command (command.command)}
+					{#if selectedJob.status === 'suggested'}
+						<div class="flex items-center justify-between gap-2">
+							<div class="panel-title">Commands For Approval</div>
+							<button class="command-button compact" onclick={addCommandDraft}>
+								<Plus class="size-4" /> Add
+							</button>
+						</div>
+					{/if}
+					{#each selectedJob.status === 'suggested' ? commandDrafts : selectedJob.commands as command, index (`${selectedJob.id}-${index}`)}
 						<div class="rounded-md border border-zinc-200 bg-zinc-50 p-3">
 							<div class="flex items-center justify-between gap-2">
-								<div class="text-sm font-medium">{command.label}</div>
-								<div class="text-xs text-zinc-500">
-									{command.requiresApproval ? 'approval required' : 'read-only'}
-								</div>
+								{#if selectedJob.status === 'suggested'}
+									<input
+										class="min-w-0 flex-1"
+										bind:value={command.label}
+										placeholder="command label"
+									/>
+									<label class="checkline text-xs">
+										<input type="checkbox" bind:checked={command.requiresApproval} />
+										approval required
+									</label>
+									<button
+										class="danger-button compact"
+										onclick={() => removeCommandDraft(index)}
+										disabled={commandDrafts.length <= 1}
+										title="Remove command"
+									>
+										<Trash2 class="size-3" />
+									</button>
+								{:else}
+									<div class="text-sm font-medium">{command.label}</div>
+									<div class="text-xs text-zinc-500">
+										{command.requiresApproval ? 'approval required' : 'read-only'}
+									</div>
+								{/if}
 							</div>
-							<pre
-								class="mt-2 overflow-auto rounded bg-zinc-950 p-2 text-xs text-zinc-100">{command.command}</pre>
+							{#if selectedJob.status === 'suggested'}
+								<textarea
+									class="mt-2 min-h-20 w-full font-mono text-xs"
+									bind:value={command.command}
+									placeholder="command to run on the worker"></textarea>
+							{:else}
+								<pre
+									class="mt-2 overflow-auto rounded bg-zinc-950 p-2 text-xs text-zinc-100">{command.command}</pre>
+							{/if}
 						</div>
 					{/each}
+					{#if selectedJob.status === 'suggested' && commandDraftError}
+						<div class="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-900">
+							{commandDraftError}
+						</div>
+					{/if}
 				</div>
 
 				<div class="mt-4 rounded border border-zinc-200 bg-white p-3">
@@ -172,11 +259,7 @@
 						bind:value={operatorNote}
 						placeholder="operator note for audit and worker queue"></textarea>
 					<div class="mt-2 flex gap-2">
-						<button
-							class="command-button"
-							onclick={approveJob}
-							disabled={!canOperate || selectedJob.status !== 'suggested'}
-						>
+						<button class="command-button" onclick={approveJob} disabled={!canApprove}>
 							<Check class="size-4" /> Approve
 						</button>
 						<button

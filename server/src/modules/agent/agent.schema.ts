@@ -9,8 +9,15 @@ export const agentJobsQuerySchema = z.object({
 	status: z.enum(['suggested', 'approved', 'rejected']).optional()
 });
 
+export const agentCommandSchema = z.object({
+	label: z.string().trim().min(1).max(200),
+	command: z.string().trim().min(1).max(20_000),
+	requiresApproval: z.boolean().default(true)
+});
+
 export const agentDecisionBodySchema = z.object({
-	operatorNote: z.string().trim().max(2000).optional()
+	operatorNote: z.string().trim().max(2000).optional(),
+	commands: z.array(agentCommandSchema).min(1).max(50).optional()
 });
 
 export const agentWorkerJobsQuerySchema = z.object({

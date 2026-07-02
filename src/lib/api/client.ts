@@ -1,6 +1,7 @@
 import type {
 	AgentJob,
 	AgentJobStatus,
+	AgentCommand,
 	ApiEnvelope,
 	AuditEvent,
 	AuditExport,
@@ -302,10 +303,10 @@ export class ApiClient {
 		return this.get<AgentJob[]>(`/api/agent/jobs${status ? `?status=${status}` : ''}`);
 	}
 
-	async approveAgentJob(id: string, operatorNote?: string) {
+	async approveAgentJob(id: string, operatorNote?: string, commands?: AgentCommand[]) {
 		return this.request<AgentJob>(`/api/agent/jobs/${id}/approve`, {
 			method: 'POST',
-			body: JSON.stringify({ operatorNote })
+			body: JSON.stringify({ operatorNote, commands })
 		});
 	}
 

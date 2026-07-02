@@ -1027,11 +1027,27 @@ test('agent jobs are persisted and approval-gated', async () => {
 			method: 'POST',
 			url: `/api/agent/jobs/${job.id}/approve`,
 			headers: { authorization: `Bearer ${token}` },
-			payload: { operatorNote: 'read-only checks approved' }
+			payload: {
+				operatorNote: 'read-only checks approved',
+				commands: [
+					{
+						label: 'Check API service status',
+						command: 'systemctl status gang-api --no-pager',
+						requiresApproval: true
+					}
+				]
+			}
 		});
 		assert.equal(approved.statusCode, 200);
 		assert.equal(approved.json().data.status, 'approved');
 		assert.equal(approved.json().data.operatorNote, 'read-only checks approved');
+		assert.deepEqual(approved.json().data.commands, [
+			{
+				label: 'Check API service status',
+				command: 'systemctl status gang-api --no-pager',
+				requiresApproval: true
+			}
+		]);
 
 		const rejectedAgain = await app.inject({
 			method: 'POST',
@@ -1049,6 +1065,38 @@ test('agent jobs are persisted and approval-gated', async () => {
 		assert.equal(audit.statusCode, 200);
 		assert.equal(audit.json().data[0].action, 'agent.job.approve');
 		assert.equal(audit.json().data[0].target, job.id);
+	});
+});
+
+test('agent approval validates operator-edited command lists', async () => {
+	await withApp(async ({ app, token }) => {
+		const created = await app.inject({
+			method: 'POST',
+			url: '/api/agent/suggest',
+			headers: { authorization: `Bearer ${token}` },
+			payload: { goal: 'inspect api worker' }
+		});
+		const jobId = created.json().data.id;
+
+		const emptyCommands = await app.inject({
+			method: 'POST',
+			url: `/api/agent/jobs/${jobId}/approve`,
+			headers: { authorization: `Bearer ${token}` },
+			payload: { commands: [] }
+		});
+		assert.equal(emptyCommands.statusCode, 400);
+		assert.equal(emptyCommands.json().error.code, 'VALIDATION_ERROR');
+
+		const blankCommand = await app.inject({
+			method: 'POST',
+			url: `/api/agent/jobs/${jobId}/approve`,
+			headers: { authorization: `Bearer ${token}` },
+			payload: {
+				commands: [{ label: 'Blank command', command: '', requiresApproval: true }]
+			}
+		});
+		assert.equal(blankCommand.statusCode, 400);
+		assert.equal(blankCommand.json().error.code, 'VALIDATION_ERROR');
 	});
 });
 

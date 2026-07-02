@@ -229,17 +229,19 @@ export type AuditExport = {
 	events: AuditEvent[];
 };
 
+export type AgentCommand = {
+	label: string;
+	command: string;
+	requiresApproval: boolean;
+};
+
 export type AgentSuggestion = {
 	id: string;
 	createdAt: string;
 	goal: string;
 	summary: string;
 	risk: 'low' | 'medium' | 'high';
-	commands: Array<{
-		label: string;
-		command: string;
-		requiresApproval: boolean;
-	}>;
+	commands: AgentCommand[];
 	notes: string[];
 };
 

@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import type {
+	AgentCommand,
 	AgentCommandResult,
 	AgentJob,
 	AgentJobStatus
@@ -82,8 +83,8 @@ export class AgentService {
 		return job;
 	}
 
-	async approve(id: string, operatorNote?: string) {
-		return this.transition(id, 'approved', operatorNote);
+	async approve(id: string, operatorNote?: string, commands?: AgentCommand[]) {
+		return this.transition(id, 'approved', operatorNote, commands);
 	}
 
 	async reject(id: string, operatorNote?: string) {
@@ -93,7 +94,8 @@ export class AgentService {
 	private async transition(
 		id: string,
 		status: Exclude<AgentJobStatus, 'suggested'>,
-		operatorNote?: string
+		operatorNote?: string,
+		commands?: AgentCommand[]
 	) {
 		let updated: AgentJob | undefined;
 		const now = new Date().toISOString();
@@ -102,6 +104,13 @@ export class AgentService {
 			if (!job) throw new HttpError(404, 'AGENT_JOB_NOT_FOUND', 'Agent job not found');
 			if (job.status !== 'suggested') {
 				throw new HttpError(409, 'AGENT_JOB_ALREADY_DECIDED', 'Agent job already decided');
+			}
+			if (status === 'approved' && commands) {
+				job.commands = commands.map((command) => ({
+					label: command.label.trim(),
+					command: command.command.trim(),
+					requiresApproval: command.requiresApproval
+				}));
 			}
 			job.status = status;
 			job.updatedAt = now;

@@ -116,7 +116,7 @@ POST /api/agent/worker/jobs/:id/complete  # { "workerId": "pi-worker-01", "resul
 POST /api/agent/worker/jobs/:id/fail      # { "workerId": "pi-worker-01", "error": "..." }
 ```
 
-Only operator-approved jobs are exposed to the worker queue. The main API stores execution state and audit events, but it does not execute shell commands itself.
+Only operator-approved jobs are exposed to the worker queue. Operators can edit the final command list before approval; the worker receives the approved command list, not a hidden browser-side draft. The main API stores execution state and audit events, but it does not execute shell commands itself.
 
 ## Backup And Restore
 

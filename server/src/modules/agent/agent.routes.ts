@@ -41,12 +41,12 @@ export async function registerAgentRoutes(
 		requireRole(request, 'operator');
 		const { id } = parseInput(idParamSchema, request.params);
 		const body = parseInput(agentDecisionBodySchema, request.body);
-		const job = await deps.agent.approve(id, body.operatorNote);
+		const job = await deps.agent.approve(id, body.operatorNote, body.commands);
 		await deps.audit.record({
 			action: 'agent.job.approve',
 			target: id,
 			status: 'ok',
-			detail: body.operatorNote || job.goal
+			detail: body.operatorNote || `${job.goal}; commands=${job.commands.length}`
 		});
 		return ok(job);
 	});
