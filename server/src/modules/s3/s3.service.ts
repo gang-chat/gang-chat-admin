@@ -98,7 +98,7 @@ export class S3Service {
 			`/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases/tags/${encodeURIComponent(safeTag)}`
 		);
 		const assets = release.assets ?? [];
-		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetNames);
+		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetNames, release.tag_name);
 		if (selectedAssets.length === 0) {
 			throw new HttpError(
 				400,
@@ -432,7 +432,8 @@ function syncableAssetCount(assets: GitHubReleaseAsset[]) {
 
 export function selectReleaseAssetsForSync<T extends { name: string }>(
 	assets: T[],
-	outputNames: { dmg: string; exe: string }
+	outputNames: { dmg: string; exe: string },
+	tagName?: string
 ) {
 	const selected: Array<{ asset: T; outputName: string }> = [];
 	let hasDmg = false;
@@ -441,18 +442,33 @@ export function selectReleaseAssetsForSync<T extends { name: string }>(
 	for (const asset of assets) {
 		const name = asset.name.trim().toLowerCase();
 		if (!hasDmg && name.endsWith('.dmg')) {
-			selected.push({ asset, outputName: validateObjectKey(outputNames.dmg) });
+			selected.push({ asset, outputName: versionedAssetName(outputNames.dmg, tagName) });
 			hasDmg = true;
 			continue;
 		}
 		if (!hasExe && name.endsWith('.exe')) {
-			selected.push({ asset, outputName: validateObjectKey(outputNames.exe) });
+			selected.push({ asset, outputName: versionedAssetName(outputNames.exe, tagName) });
 			hasExe = true;
 		}
 		if (hasDmg && hasExe) break;
 	}
 
 	return selected;
+}
+
+function versionedAssetName(fileName: string, tagName?: string) {
+	const safeFileName = validateObjectKey(fileName);
+	if (!tagName?.trim()) return safeFileName;
+	const dot = safeFileName.lastIndexOf('.');
+	const base = dot > 0 ? safeFileName.slice(0, dot) : safeFileName;
+	const extension = dot > 0 ? safeFileName.slice(dot) : '';
+	return validateObjectKey(`${base}_${safeVersionTag(tagName)}${extension}`);
+}
+
+function safeVersionTag(tagName: string) {
+	const withoutPrefix = tagName.trim().replace(/^v(?=\d)/i, '');
+	const safe = withoutPrefix.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+	return safe || 'release';
 }
 
 export function validateBucketName(bucket: string) {

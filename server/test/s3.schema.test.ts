@@ -111,14 +111,15 @@ test('S3 release sync selects first dmg and exe with configured names', () => {
 			{ name: 'win-a.exe' },
 			{ name: 'win-b.exe' }
 		],
-		{ dmg: 'GangChat.dmg', exe: 'GangChat.exe' }
+		{ dmg: 'GangChat.dmg', exe: 'GangChat.exe' },
+		'v1.2.3'
 	);
 
 	assert.deepEqual(
 		selected.map((item) => ({ source: item.asset.name, output: item.outputName })),
 		[
-			{ source: 'mac-a.dmg', output: 'GangChat.dmg' },
-			{ source: 'win-a.exe', output: 'GangChat.exe' }
+			{ source: 'mac-a.dmg', output: 'GangChat_1.2.3.dmg' },
+			{ source: 'win-a.exe', output: 'GangChat_1.2.3.exe' }
 		]
 	);
 });
