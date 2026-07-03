@@ -466,8 +466,7 @@ function versionedAssetName(fileName: string, tagName?: string) {
 }
 
 function safeVersionTag(tagName: string) {
-	const withoutPrefix = tagName.trim().replace(/^v(?=\d)/i, '');
-	const safe = withoutPrefix.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+	const safe = tagName.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
 	return safe || 'release';
 }
 
