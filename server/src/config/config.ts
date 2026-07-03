@@ -45,6 +45,10 @@ export type ReleaseSyncConfig = {
 	owner: string;
 	repo: string;
 	targetPrefix: string;
+	assetNames: {
+		dmg: string;
+		exe: string;
+	};
 	githubToken?: string;
 };
 
@@ -87,6 +91,10 @@ type RawConfig = {
 	releaseSync?: {
 		repositoryUrl?: string;
 		targetPrefix?: string;
+		assetNames?: {
+			dmg?: string;
+			exe?: string;
+		};
 		githubToken?: string;
 	};
 	connections?: Partial<ConfigConnections>;
@@ -213,11 +221,24 @@ function normalizeReleaseSync(input: RawConfig['releaseSync']): ReleaseSyncConfi
 		requiredString(input.targetPrefix, 'releaseSync.targetPrefix'),
 		'releaseSync.targetPrefix'
 	);
+	const assetNames = {
+		dmg: normalizeAssetFileName(
+			requiredString(input.assetNames?.dmg, 'releaseSync.assetNames.dmg'),
+			'.dmg',
+			'releaseSync.assetNames.dmg'
+		),
+		exe: normalizeAssetFileName(
+			requiredString(input.assetNames?.exe, 'releaseSync.assetNames.exe'),
+			'.exe',
+			'releaseSync.assetNames.exe'
+		)
+	};
 	return {
 		repositoryUrl,
 		owner: repository.owner,
 		repo: repository.repo,
 		targetPrefix,
+		assetNames,
 		githubToken: input.githubToken?.trim() || undefined
 	};
 }
@@ -326,6 +347,18 @@ function normalizeObjectPrefix(input: string, name: string) {
 		throw new Error(`${name} cannot contain .. path segments`);
 	}
 	return value.endsWith('/') ? value : `${value}/`;
+}
+
+function normalizeAssetFileName(input: string, extension: '.dmg' | '.exe', name: string) {
+	const value = input.trim().replace(/^\/+/, '');
+	if (!value) throw new Error(`${name} is required in config.json`);
+	if (value.length > 255) throw new Error(`${name} is too long in config.json`);
+	if (value.includes('/')) throw new Error(`${name} must be a file name, not a path`);
+	if (hasControlCharacter(value)) throw new Error(`${name} cannot contain control characters`);
+	if (!value.toLowerCase().endsWith(extension)) {
+		throw new Error(`${name} must end with ${extension}`);
+	}
+	return value;
 }
 
 function hasControlCharacter(value: string) {

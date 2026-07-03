@@ -60,7 +60,8 @@ export class S3Service {
 			enabled: true,
 			repository: `${this.releaseSync.owner}/${this.releaseSync.repo}`,
 			repositoryUrl: this.releaseSync.repositoryUrl,
-			targetPrefix: this.releaseSync.targetPrefix
+			targetPrefix: this.releaseSync.targetPrefix,
+			assetNames: this.releaseSync.assetNames
 		};
 	}
 
@@ -78,7 +79,7 @@ export class S3Service {
 				htmlUrl: release.html_url,
 				publishedAt: release.published_at ?? undefined,
 				prerelease: Boolean(release.prerelease),
-				assetCount: release.assets?.length ?? 0
+				assetCount: syncableAssetCount(release.assets ?? [])
 			}));
 	}
 
@@ -97,16 +98,21 @@ export class S3Service {
 			`/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases/tags/${encodeURIComponent(safeTag)}`
 		);
 		const assets = release.assets ?? [];
-		if (assets.length === 0) {
-			throw new HttpError(400, 'GITHUB_RELEASE_HAS_NO_ASSETS', 'Selected release has no assets');
+		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetNames);
+		if (selectedAssets.length === 0) {
+			throw new HttpError(
+				400,
+				'GITHUB_RELEASE_HAS_NO_SUPPORTED_ASSETS',
+				'Selected release has no .dmg or .exe assets'
+			);
 		}
 
 		const client = await this.client(connectionId);
 		const deleted = await this.clearPrefix(client, safeBucket, config.targetPrefix);
 		const uploaded: S3ReleaseSyncResult['uploaded'] = [];
 
-		for (const asset of assets) {
-			const key = `${config.targetPrefix}${safeAssetName(asset.name)}`;
+		for (const { asset, outputName } of selectedAssets) {
+			const key = `${config.targetPrefix}${outputName}`;
 			const response = await this.githubFetch(asset.url, {
 				accept: 'application/octet-stream'
 			});
@@ -128,7 +134,8 @@ export class S3Service {
 				}
 			}).done();
 			uploaded.push({
-				name: asset.name,
+				name: outputName,
+				sourceName: asset.name,
 				key,
 				size: asset.size,
 				contentType: asset.content_type || response.headers.get('content-type') || undefined
@@ -419,11 +426,33 @@ export class S3Service {
 	}
 }
 
-function safeAssetName(name: string) {
-	const trimmed = name.trim();
-	if (!trimmed) throw new HttpError(400, 'INVALID_GITHUB_ASSET_NAME', 'GitHub asset has no name');
-	const fileName = trimmed.split('/').filter(Boolean).at(-1) ?? trimmed;
-	return validateObjectKey(fileName);
+function syncableAssetCount(assets: GitHubReleaseAsset[]) {
+	return selectReleaseAssetsForSync(assets, { dmg: 'x.dmg', exe: 'x.exe' }).length;
+}
+
+export function selectReleaseAssetsForSync<T extends { name: string }>(
+	assets: T[],
+	outputNames: { dmg: string; exe: string }
+) {
+	const selected: Array<{ asset: T; outputName: string }> = [];
+	let hasDmg = false;
+	let hasExe = false;
+
+	for (const asset of assets) {
+		const name = asset.name.trim().toLowerCase();
+		if (!hasDmg && name.endsWith('.dmg')) {
+			selected.push({ asset, outputName: validateObjectKey(outputNames.dmg) });
+			hasDmg = true;
+			continue;
+		}
+		if (!hasExe && name.endsWith('.exe')) {
+			selected.push({ asset, outputName: validateObjectKey(outputNames.exe) });
+			hasExe = true;
+		}
+		if (hasDmg && hasExe) break;
+	}
+
+	return selected;
 }
 
 export function validateBucketName(bucket: string) {

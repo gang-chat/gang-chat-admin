@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	isS3NotFoundError,
+	selectReleaseAssetsForSync,
 	validateBucketName,
 	validateObjectKey
 } from '../src/modules/s3/s3.service';
@@ -98,5 +99,26 @@ test('S3 not-found helper recognizes common SDK not-found shapes', () => {
 	assert.equal(
 		isS3NotFoundError({ name: 'AccessDenied', $metadata: { httpStatusCode: 403 } }),
 		false
+	);
+});
+
+test('S3 release sync selects first dmg and exe with configured names', () => {
+	const selected = selectReleaseAssetsForSync(
+		[
+			{ name: 'app.zip' },
+			{ name: 'mac-a.dmg' },
+			{ name: 'mac-b.dmg' },
+			{ name: 'win-a.exe' },
+			{ name: 'win-b.exe' }
+		],
+		{ dmg: 'GangChat.dmg', exe: 'GangChat.exe' }
+	);
+
+	assert.deepEqual(
+		selected.map((item) => ({ source: item.asset.name, output: item.outputName })),
+		[
+			{ source: 'mac-a.dmg', output: 'GangChat.dmg' },
+			{ source: 'win-a.exe', output: 'GangChat.exe' }
+		]
 	);
 });

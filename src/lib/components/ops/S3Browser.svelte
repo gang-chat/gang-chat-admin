@@ -346,6 +346,11 @@
 								<div class="text-muted-foreground mt-1 truncate text-xs">
 									{releaseSyncConfig.repository} -> {bucket}/{releaseSyncConfig.targetPrefix}
 								</div>
+								{#if releaseSyncConfig.assetNames}
+									<div class="text-muted-foreground mt-1 truncate text-xs">
+										{releaseSyncConfig.assetNames.dmg} / {releaseSyncConfig.assetNames.exe}
+									</div>
+								{/if}
 							</div>
 							<div class="flex min-w-0 flex-wrap items-center gap-2">
 								<Select.Root type="single" bind:value={selectedReleaseTag}>

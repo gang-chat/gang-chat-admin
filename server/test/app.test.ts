@@ -1973,7 +1973,12 @@ test('S3 release sync lists configured GitHub releases', async () => {
 					published_at: '2026-07-03T00:00:00Z',
 					prerelease: false,
 					draft: false,
-					assets: [{ id: 1, name: 'app.zip', size: 12, url: 'https://api.github.com/assets/1' }]
+					assets: [
+						{ id: 1, name: 'app-mac-a.dmg', size: 12, url: 'https://api.github.com/assets/1' },
+						{ id: 2, name: 'app-mac-b.dmg', size: 13, url: 'https://api.github.com/assets/2' },
+						{ id: 3, name: 'app-win-a.exe', size: 14, url: 'https://api.github.com/assets/3' },
+						{ id: 4, name: 'app.zip', size: 15, url: 'https://api.github.com/assets/4' }
+					]
 				},
 				{
 					id: 102,
@@ -2003,6 +2008,10 @@ test('S3 release sync lists configured GitHub releases', async () => {
 				assert.equal(config.json().data.enabled, true);
 				assert.equal(config.json().data.repository, 'LoganZ2/gang-chat-admin');
 				assert.equal(config.json().data.targetPrefix, 'releases/current/');
+				assert.deepEqual(config.json().data.assetNames, {
+					dmg: 'GangChat.dmg',
+					exe: 'GangChat.exe'
+				});
 				assert.equal(releases.statusCode, 200);
 				assert.deepEqual(releases.json().data, [
 					{
@@ -2012,7 +2021,7 @@ test('S3 release sync lists configured GitHub releases', async () => {
 						htmlUrl: 'https://github.com/LoganZ2/gang-chat-admin/releases/tag/v1.2.3',
 						publishedAt: '2026-07-03T00:00:00Z',
 						prerelease: false,
-						assetCount: 1
+						assetCount: 2
 					}
 				]);
 			},
@@ -2022,7 +2031,11 @@ test('S3 release sync lists configured GitHub releases', async () => {
 					repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
 					owner: 'LoganZ2',
 					repo: 'gang-chat-admin',
-					targetPrefix: 'releases/current/'
+					targetPrefix: 'releases/current/',
+					assetNames: {
+						dmg: 'GangChat.dmg',
+						exe: 'GangChat.exe'
+					}
 				}
 			}
 		);

@@ -163,6 +163,10 @@ export type S3ReleaseSyncConfig = {
 	repository?: string;
 	repositoryUrl?: string;
 	targetPrefix?: string;
+	assetNames?: {
+		dmg: string;
+		exe: string;
+	};
 };
 
 export type S3ReleaseVersion = {
@@ -177,6 +181,7 @@ export type S3ReleaseVersion = {
 
 export type S3ReleaseSyncUploadedObject = {
 	name: string;
+	sourceName: string;
 	key: string;
 	size: number;
 	contentType?: string;
