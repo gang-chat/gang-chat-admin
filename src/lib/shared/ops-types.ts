@@ -158,6 +158,38 @@ export type S3ObjectList = {
 	nextContinuationToken?: string;
 };
 
+export type S3ReleaseSyncConfig = {
+	enabled: boolean;
+	repository?: string;
+	repositoryUrl?: string;
+	targetPrefix?: string;
+};
+
+export type S3ReleaseVersion = {
+	id: number;
+	tagName: string;
+	name?: string;
+	htmlUrl?: string;
+	publishedAt?: string;
+	prerelease: boolean;
+	assetCount: number;
+};
+
+export type S3ReleaseSyncUploadedObject = {
+	name: string;
+	key: string;
+	size: number;
+	contentType?: string;
+};
+
+export type S3ReleaseSyncResult = {
+	repository: string;
+	tagName: string;
+	targetPrefix: string;
+	deleted: number;
+	uploaded: S3ReleaseSyncUploadedObject[];
+};
+
 export type ExpenseEntry = {
 	id: string;
 	month: string;

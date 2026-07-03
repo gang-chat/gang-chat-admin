@@ -19,6 +19,9 @@ import type {
 	MysqlTableSummary,
 	S3ObjectList,
 	S3ObjectMetadata,
+	S3ReleaseSyncConfig,
+	S3ReleaseSyncResult,
+	S3ReleaseVersion,
 	SshActiveSession
 } from '$lib/shared/ops-types';
 
@@ -188,6 +191,21 @@ export class ApiClient {
 		return this.raw(
 			`/api/s3/${id}/objects/download?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`
 		);
+	}
+
+	async s3ReleaseSyncConfig(id: string) {
+		return this.get<S3ReleaseSyncConfig>(`/api/s3/${id}/release-sync`);
+	}
+
+	async s3ReleaseVersions(id: string) {
+		return this.get<S3ReleaseVersion[]>(`/api/s3/${id}/release-sync/releases`);
+	}
+
+	async s3SyncRelease(id: string, bucket: string, tagName: string) {
+		return this.request<S3ReleaseSyncResult>(`/api/s3/${id}/release-sync`, {
+			method: 'POST',
+			body: JSON.stringify({ bucket, tagName })
+		});
 	}
 
 	async sshTicket(id: string) {

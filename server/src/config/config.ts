@@ -30,6 +30,7 @@ export type ServerConfig = {
 	authMaxFailedLogins: number;
 	authLockoutMs: number;
 	aiAdminWorker: AiAdminWorkerConfig;
+	releaseSync: ReleaseSyncConfig | null;
 	connections: ConfigConnections;
 };
 
@@ -37,6 +38,14 @@ export type AiAdminWorkerConfig = {
 	baseUrl: string;
 	apiKey: string;
 	model: string;
+};
+
+export type ReleaseSyncConfig = {
+	repositoryUrl: string;
+	owner: string;
+	repo: string;
+	targetPrefix: string;
+	githubToken?: string;
 };
 
 export type ConfigConnectionInput = ConnectionInput & { id?: string };
@@ -75,6 +84,11 @@ type RawConfig = {
 	authMaxFailedLogins?: number;
 	authLockoutMs?: number;
 	aiAdminWorker?: Partial<AiAdminWorkerConfig>;
+	releaseSync?: {
+		repositoryUrl?: string;
+		targetPrefix?: string;
+		githubToken?: string;
+	};
 	connections?: Partial<ConfigConnections>;
 };
 
@@ -177,6 +191,7 @@ export async function loadConfig(): Promise<ServerConfig> {
 		),
 		authLockoutMs: positiveNumber(raw.authLockoutMs ?? DEFAULT_CONFIG.authLockoutMs, 'authLockoutMs'),
 		aiAdminWorker: normalizeAiAdminWorker(raw.aiAdminWorker),
+		releaseSync: normalizeReleaseSync(raw.releaseSync),
 		connections: normalizeConnections(raw.connections)
 	};
 }
@@ -187,6 +202,23 @@ function normalizeAiAdminWorker(input: RawConfig['aiAdminWorker']): AiAdminWorke
 		baseUrl: requiredString(input.baseUrl, 'aiAdminWorker.baseUrl').replace(/\/$/, ''),
 		apiKey: requiredString(input.apiKey, 'aiAdminWorker.apiKey'),
 		model: requiredString(input.model, 'aiAdminWorker.model')
+	};
+}
+
+function normalizeReleaseSync(input: RawConfig['releaseSync']): ReleaseSyncConfig | null {
+	if (!input) return null;
+	const repositoryUrl = requiredString(input.repositoryUrl, 'releaseSync.repositoryUrl');
+	const repository = parseGitHubRepository(repositoryUrl);
+	const targetPrefix = normalizeObjectPrefix(
+		requiredString(input.targetPrefix, 'releaseSync.targetPrefix'),
+		'releaseSync.targetPrefix'
+	);
+	return {
+		repositoryUrl,
+		owner: repository.owner,
+		repo: repository.repo,
+		targetPrefix,
+		githubToken: input.githubToken?.trim() || undefined
 	};
 }
 
@@ -259,6 +291,48 @@ function positiveNumber(value: number | undefined, name: string) {
 		throw new Error(`${name} must be a positive number in config.json`);
 	}
 	return value!;
+}
+
+function parseGitHubRepository(input: string) {
+	const trimmed = input.trim().replace(/\.git$/, '');
+	const shorthand = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(trimmed);
+	if (shorthand) return { owner: shorthand[1], repo: shorthand[2] };
+
+	const ssh = /^git@github\.com:([^/]+)\/(.+)$/.exec(trimmed);
+	if (ssh) return { owner: ssh[1], repo: ssh[2].replace(/\.git$/, '') };
+
+	let url: URL;
+	try {
+		url = new URL(trimmed);
+	} catch {
+		throw new Error('releaseSync.repositoryUrl must be a GitHub repository URL');
+	}
+	if (url.hostname !== 'github.com') {
+		throw new Error('releaseSync.repositoryUrl must point to github.com');
+	}
+	const [owner, repo] = url.pathname.replace(/^\/+/, '').split('/');
+	if (!owner || !repo) {
+		throw new Error('releaseSync.repositoryUrl must include owner and repo');
+	}
+	return { owner, repo: repo.replace(/\.git$/, '') };
+}
+
+function normalizeObjectPrefix(input: string, name: string) {
+	const value = input.trim().replace(/^\/+/, '');
+	if (!value) throw new Error(`${name} is required in config.json`);
+	if (value.length > 1024) throw new Error(`${name} is too long in config.json`);
+	if (hasControlCharacter(value)) throw new Error(`${name} cannot contain control characters`);
+	if (value.split('/').some((part) => part === '..')) {
+		throw new Error(`${name} cannot contain .. path segments`);
+	}
+	return value.endsWith('/') ? value : `${value}/`;
+}
+
+function hasControlCharacter(value: string) {
+	return Array.from(value).some((char) => {
+		const code = char.charCodeAt(0);
+		return code < 32 || code === 127;
+	});
 }
 
 function validateCorsOrigins(origins: string[], nodeEnv: string) {

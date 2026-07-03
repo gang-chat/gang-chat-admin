@@ -7,6 +7,7 @@ import type { AuditRepository } from '../audit/audit.repository';
 import { auditErrorDetail } from '../audit/audit-error';
 import {
 	s3ObjectQuerySchema,
+	s3ReleaseSyncBodySchema,
 	s3ObjectTargetBodySchema,
 	s3ObjectTargetQuerySchema
 } from './s3.schema';
@@ -25,6 +26,36 @@ export async function registerS3Routes(
 				maxKeys: query.maxKeys
 			})
 		);
+	});
+
+	app.get('/api/s3/:id/release-sync', async () => ok(deps.s3.releaseSyncConfig()));
+
+	app.get('/api/s3/:id/release-sync/releases', async () => ok(await deps.s3.listReleaseVersions()));
+
+	app.post('/api/s3/:id/release-sync', async (request) => {
+		requireRole(request, 'operator');
+		const { id } = parseInput(idParamSchema, request.params);
+		const body = parseInput(s3ReleaseSyncBodySchema, request.body);
+		let target = `${body.bucket}:${body.tagName}`;
+		try {
+			const result = await deps.s3.syncRelease(id, body.bucket, body.tagName);
+			target = `${body.bucket}:${result.targetPrefix}`;
+			await deps.audit.record({
+				action: 's3.release.sync',
+				target,
+				status: 'ok',
+				detail: `${result.repository}@${result.tagName}: uploaded ${result.uploaded.length}, deleted ${result.deleted}`
+			});
+			return ok(result);
+		} catch (error) {
+			await deps.audit.record({
+				action: 's3.release.sync',
+				target,
+				status: 'failed',
+				detail: auditErrorDetail(error, 'S3 release sync failed')
+			});
+			throw error;
+		}
 	});
 
 	app.get('/api/s3/:id/objects/head', async (request) => {

@@ -1,4 +1,4 @@
-import type { Readable } from 'node:stream';
+import { Readable } from 'node:stream';
 import {
 	DeleteObjectCommand,
 	GetObjectCommand,
@@ -8,7 +8,15 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import type { FastifyRequest } from 'fastify';
-import type { S3ObjectList, S3ObjectMetadata, S3PublicConfig } from '../../../../src/lib/shared/ops-types';
+import type {
+	S3ObjectList,
+	S3ObjectMetadata,
+	S3PublicConfig,
+	S3ReleaseSyncConfig,
+	S3ReleaseSyncResult,
+	S3ReleaseVersion
+} from '../../../../src/lib/shared/ops-types';
+import type { ReleaseSyncConfig } from '../../config/config';
 import { HttpError } from '../../core/http';
 import { parseInput } from '../../core/validation';
 import type { ConnectionsRepository } from '../connections/connections.repository';
@@ -20,8 +28,121 @@ type S3Secret = {
 	sessionToken?: string;
 };
 
+type GitHubReleaseAsset = {
+	id: number;
+	name: string;
+	size: number;
+	url: string;
+	browser_download_url?: string;
+	content_type?: string;
+};
+
+type GitHubRelease = {
+	id: number;
+	tag_name: string;
+	name?: string | null;
+	html_url?: string;
+	published_at?: string | null;
+	prerelease?: boolean;
+	draft?: boolean;
+	assets?: GitHubReleaseAsset[];
+};
+
 export class S3Service {
-	constructor(private readonly connections: ConnectionsRepository) {}
+	constructor(
+		private readonly connections: ConnectionsRepository,
+		private readonly releaseSync: ReleaseSyncConfig | null = null
+	) {}
+
+	releaseSyncConfig(): S3ReleaseSyncConfig {
+		if (!this.releaseSync) return { enabled: false };
+		return {
+			enabled: true,
+			repository: `${this.releaseSync.owner}/${this.releaseSync.repo}`,
+			repositoryUrl: this.releaseSync.repositoryUrl,
+			targetPrefix: this.releaseSync.targetPrefix
+		};
+	}
+
+	async listReleaseVersions(): Promise<S3ReleaseVersion[]> {
+		const config = this.requireReleaseSync();
+		const releases = await this.githubJson<GitHubRelease[]>(
+			`/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases`
+		);
+		return releases
+			.filter((release) => release.tag_name && !release.draft)
+			.map((release) => ({
+				id: release.id,
+				tagName: release.tag_name,
+				name: release.name ?? undefined,
+				htmlUrl: release.html_url,
+				publishedAt: release.published_at ?? undefined,
+				prerelease: Boolean(release.prerelease),
+				assetCount: release.assets?.length ?? 0
+			}));
+	}
+
+	async syncRelease(
+		connectionId: string,
+		bucket: string,
+		tagName: string
+	): Promise<S3ReleaseSyncResult> {
+		await this.assertWritesAllowed(connectionId);
+		const config = this.requireReleaseSync();
+		const safeBucket = validateBucketName(bucket);
+		const safeTag = tagName.trim();
+		if (!safeTag) throw new HttpError(400, 'INVALID_RELEASE_TAG', 'Release tag is required');
+
+		const release = await this.githubJson<GitHubRelease>(
+			`/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases/tags/${encodeURIComponent(safeTag)}`
+		);
+		const assets = release.assets ?? [];
+		if (assets.length === 0) {
+			throw new HttpError(400, 'GITHUB_RELEASE_HAS_NO_ASSETS', 'Selected release has no assets');
+		}
+
+		const client = await this.client(connectionId);
+		const deleted = await this.clearPrefix(client, safeBucket, config.targetPrefix);
+		const uploaded: S3ReleaseSyncResult['uploaded'] = [];
+
+		for (const asset of assets) {
+			const key = `${config.targetPrefix}${safeAssetName(asset.name)}`;
+			const response = await this.githubFetch(asset.url, {
+				accept: 'application/octet-stream'
+			});
+			if (!response.body) {
+				throw new HttpError(502, 'GITHUB_ASSET_DOWNLOAD_FAILED', `GitHub asset is empty: ${asset.name}`);
+			}
+			await new Upload({
+				client,
+				params: {
+					Bucket: safeBucket,
+					Key: key,
+					Body: Readable.fromWeb(response.body as never),
+					ContentType: asset.content_type || response.headers.get('content-type') || undefined,
+					Metadata: {
+						'github-repository': `${config.owner}/${config.repo}`,
+						'github-release-tag': release.tag_name,
+						'github-asset-id': String(asset.id)
+					}
+				}
+			}).done();
+			uploaded.push({
+				name: asset.name,
+				key,
+				size: asset.size,
+				contentType: asset.content_type || response.headers.get('content-type') || undefined
+			});
+		}
+
+		return {
+			repository: `${config.owner}/${config.repo}`,
+			tagName: release.tag_name,
+			targetPrefix: config.targetPrefix,
+			deleted,
+			uploaded
+		};
+	}
 
 	async listObjects(
 		connectionId: string,
@@ -232,6 +353,77 @@ export class S3Service {
 		}
 		throw new HttpError(409, 'S3_OBJECT_ALREADY_EXISTS', 'Object already exists');
 	}
+
+	private requireReleaseSync() {
+		if (!this.releaseSync) {
+			throw new HttpError(
+				404,
+				'RELEASE_SYNC_NOT_CONFIGURED',
+				'Configure releaseSync.repositoryUrl and releaseSync.targetPrefix in config.json'
+			);
+		}
+		return this.releaseSync;
+	}
+
+	private async clearPrefix(client: S3Client, bucket: string, prefix: string) {
+		if (!prefix.trim()) {
+			throw new HttpError(400, 'INVALID_RELEASE_PREFIX', 'Release sync prefix cannot be empty');
+		}
+		const keys: string[] = [];
+		let continuationToken: string | undefined;
+		do {
+			const result = await client.send(
+				new ListObjectsV2Command({
+					Bucket: bucket,
+					Prefix: prefix,
+					ContinuationToken: continuationToken,
+					MaxKeys: 1000
+				})
+			);
+			for (const object of result.Contents ?? []) {
+				if (object.Key) keys.push(object.Key);
+			}
+			continuationToken = result.NextContinuationToken;
+		} while (continuationToken);
+
+		for (const key of keys) {
+			await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+		}
+		return keys.length;
+	}
+
+	private async githubJson<T>(path: string): Promise<T> {
+		const response = await this.githubFetch(path, {
+			accept: 'application/vnd.github+json'
+		});
+		return (await response.json()) as T;
+	}
+
+	private async githubFetch(pathOrUrl: string, options: { accept: string }) {
+		const config = this.requireReleaseSync();
+		const url = pathOrUrl.startsWith('http') ? pathOrUrl : `https://api.github.com${pathOrUrl}`;
+		const headers: Record<string, string> = {
+			accept: options.accept,
+			'user-agent': 'gang-chat-admin'
+		};
+		if (config.githubToken) headers.authorization = `Bearer ${config.githubToken}`;
+		const response = await fetch(url, { headers });
+		if (!response.ok) {
+			throw new HttpError(
+				response.status >= 500 ? 502 : response.status,
+				'GITHUB_RELEASE_REQUEST_FAILED',
+				`GitHub request failed: ${response.status} ${response.statusText}`
+			);
+		}
+		return response;
+	}
+}
+
+function safeAssetName(name: string) {
+	const trimmed = name.trim();
+	if (!trimmed) throw new HttpError(400, 'INVALID_GITHUB_ASSET_NAME', 'GitHub asset has no name');
+	const fileName = trimmed.split('/').filter(Boolean).at(-1) ?? trimmed;
+	return validateObjectKey(fileName);
 }
 
 export function validateBucketName(bucket: string) {

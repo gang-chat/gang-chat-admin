@@ -62,6 +62,7 @@ async function withApp(
 			apiKey: 'test-ai-key',
 			model: 'ops-model'
 		},
+		releaseSync: null,
 		connections: { mysql: null, s3: null, ssh: [] }
 	};
 	const env: ServerConfig = { ...baseEnv, ...envOverrides };
@@ -1955,6 +1956,81 @@ test('S3 writes are blocked unless the preset explicitly allows writes', async (
 	);
 });
 
+test('S3 release sync lists configured GitHub releases', async () => {
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = (async (input) => {
+		assert.equal(
+			String(input),
+			'https://api.github.com/repos/LoganZ2/gang-chat-admin/releases'
+		);
+		return new Response(
+			JSON.stringify([
+				{
+					id: 101,
+					tag_name: 'v1.2.3',
+					name: 'v1.2.3',
+					html_url: 'https://github.com/LoganZ2/gang-chat-admin/releases/tag/v1.2.3',
+					published_at: '2026-07-03T00:00:00Z',
+					prerelease: false,
+					draft: false,
+					assets: [{ id: 1, name: 'app.zip', size: 12, url: 'https://api.github.com/assets/1' }]
+				},
+				{
+					id: 102,
+					tag_name: 'draft',
+					draft: true,
+					assets: []
+				}
+			]),
+			{ status: 200, headers: { 'content-type': 'application/json' } }
+		);
+	}) as typeof fetch;
+	try {
+		await withApp(
+			async ({ app, token }) => {
+				const config = await app.inject({
+					method: 'GET',
+					url: '/api/s3/write-s3/release-sync',
+					headers: { authorization: `Bearer ${token}` }
+				});
+				const releases = await app.inject({
+					method: 'GET',
+					url: '/api/s3/write-s3/release-sync/releases',
+					headers: { authorization: `Bearer ${token}` }
+				});
+
+				assert.equal(config.statusCode, 200);
+				assert.equal(config.json().data.enabled, true);
+				assert.equal(config.json().data.repository, 'LoganZ2/gang-chat-admin');
+				assert.equal(config.json().data.targetPrefix, 'releases/current/');
+				assert.equal(releases.statusCode, 200);
+				assert.deepEqual(releases.json().data, [
+					{
+						id: 101,
+						tagName: 'v1.2.3',
+						name: 'v1.2.3',
+						htmlUrl: 'https://github.com/LoganZ2/gang-chat-admin/releases/tag/v1.2.3',
+						publishedAt: '2026-07-03T00:00:00Z',
+						prerelease: false,
+						assetCount: 1
+					}
+				]);
+			},
+			{
+				connections: s3Connections(true),
+				releaseSync: {
+					repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
+					owner: 'LoganZ2',
+					repo: 'gang-chat-admin',
+					targetPrefix: 'releases/current/'
+				}
+			}
+		);
+	} finally {
+		globalThis.fetch = previousFetch;
+	}
+});
+
 test('S3 routes validate object inputs before hitting storage adapters', async () => {
 	await withApp(async ({ app, token }) => {
 		const listMissingBucket = await app.inject({
@@ -1989,6 +2065,12 @@ test('S3 routes validate object inputs before hitting storage adapters', async (
 			headers: { authorization: `Bearer ${token}` },
 			payload: { bucket: 'logs', key: 'prod/app.log', confirmation: 'wrong-key' }
 		});
+		const releaseSyncMissingTag = await app.inject({
+			method: 'POST',
+			url: '/api/s3/s3-conn/release-sync',
+			headers: { authorization: `Bearer ${token}` },
+			payload: { bucket: 'logs' }
+		});
 
 		assert.equal(listMissingBucket.statusCode, 400);
 		assert.equal(downloadMissingKey.statusCode, 400);
@@ -1996,11 +2078,13 @@ test('S3 routes validate object inputs before hitting storage adapters', async (
 		assert.equal(headUnsafeKey.statusCode, 400);
 		assert.equal(deleteMissingKey.statusCode, 400);
 		assert.equal(deleteWrongConfirmation.statusCode, 400);
+		assert.equal(releaseSyncMissingTag.statusCode, 400);
 		assert.equal(listMissingBucket.json().error.code, 'VALIDATION_ERROR');
 		assert.equal(downloadMissingKey.json().error.code, 'VALIDATION_ERROR');
 		assert.equal(headMissingKey.json().error.code, 'VALIDATION_ERROR');
 		assert.equal(headUnsafeKey.json().error.code, 'VALIDATION_ERROR');
 		assert.equal(deleteMissingKey.json().error.code, 'VALIDATION_ERROR');
 		assert.equal(deleteWrongConfirmation.json().error.code, 'DESTRUCTIVE_CONFIRMATION_REQUIRED');
+		assert.equal(releaseSyncMissingTag.json().error.code, 'VALIDATION_ERROR');
 	});
 });

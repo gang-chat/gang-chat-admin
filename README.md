@@ -75,6 +75,18 @@ Connection presets are also configured in `config.json` and are read-only at run
 }
 ```
 
+GitHub release sync is optional. When configured, the S3 panel can list release versions from the repository and sync the selected release assets into the configured object prefix:
+
+```json
+{
+	"releaseSync": {
+		"repositoryUrl": "https://github.com/owner/repo",
+		"targetPrefix": "releases/current/",
+		"githubToken": "optional-for-private-repos"
+	}
+}
+```
+
 ## Run Locally
 
 ```sh

@@ -88,7 +88,7 @@ export async function buildApp(env: ServerConfig) {
 	);
 	await auth.initialize();
 	const mysql = new MysqlService(connections);
-	const s3 = new S3Service(connections);
+	const s3 = new S3Service(connections, env.releaseSync);
 	const expenses = new ExpensesRepository(env.dataDir);
 	const agent = new AgentService(env.dataDir);
 

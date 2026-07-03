@@ -19,6 +19,13 @@ test('loadConfig reads explicit config file', async () => {
 				apiKey: 'test-ai-key',
 				model: 'ops-model'
 			});
+			assert.deepEqual(config.releaseSync, {
+				repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
+				owner: 'LoganZ2',
+				repo: 'gang-chat-admin',
+				targetPrefix: 'releases/current/',
+				githubToken: undefined
+			});
 			assert.equal(config.connections.ssh.length, 0);
 		});
 	} finally {
@@ -38,6 +45,7 @@ test('loadConfig applies defaults for operational settings', async () => {
 			assert.equal(config.port, 8787);
 			assert.equal(config.dataDir, path.join(dir, '.ops-data'));
 			assert.equal(config.rateLimitMax, 600);
+			assert.equal(config.releaseSync, null);
 			assert.equal(config.connections.mysql, null);
 			assert.equal(config.connections.s3, null);
 			assert.deepEqual(config.connections.ssh, []);
@@ -122,6 +130,10 @@ function baseConfig() {
 			baseUrl: 'https://llm.example.com/v1/',
 			apiKey: 'test-ai-key',
 			model: 'ops-model'
+		},
+		releaseSync: {
+			repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
+			targetPrefix: 'releases/current'
 		},
 		connections: { mysql: null, s3: null, ssh: [] }
 	};

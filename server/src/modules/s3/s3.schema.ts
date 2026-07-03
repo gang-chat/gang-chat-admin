@@ -185,6 +185,11 @@ export const s3ObjectTargetBodySchema = s3ObjectTargetQuerySchema.extend({
 	confirmation: z.string().trim().min(1).max(2048)
 });
 
+export const s3ReleaseSyncBodySchema = z.object({
+	bucket: s3BucketNameSchema,
+	tagName: z.string().trim().min(1).max(255)
+});
+
 export const s3UploadFieldsSchema = z.object({
 	bucket: s3BucketNameSchema,
 	key: s3ObjectKeySchema,

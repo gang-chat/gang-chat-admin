@@ -17,7 +17,13 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Table from '$lib/components/ui/table';
 	import type { ApiClient } from '$lib/api/client';
-	import type { AuthRole, ConnectionPreset, S3ObjectSummary } from '$lib/shared/ops-types';
+	import type {
+		AuthRole,
+		ConnectionPreset,
+		S3ObjectSummary,
+		S3ReleaseSyncConfig,
+		S3ReleaseVersion
+	} from '$lib/shared/ops-types';
 	import type { RunTask } from './types';
 
 	let {
@@ -51,6 +57,11 @@
 	let overwriteConfirmKey = $state('');
 	let deleteCandidate = $state<S3ObjectSummary | undefined>();
 	let deleteConfirmKey = $state('');
+	let releaseSyncConfig = $state<S3ReleaseSyncConfig>({ enabled: false });
+	let releaseVersions = $state<S3ReleaseVersion[]>([]);
+	let releaseLoadedFor = $state('');
+	let selectedReleaseTag = $state('');
+	let releaseSyncSummary = $state('');
 
 	let selectedObject = $derived(objects.find((object) => object.key === selectedKey));
 	let selectedConnection = $derived(
@@ -80,6 +91,19 @@
 			(!uploadOverwrites || (allowOverwrite && overwriteConfirmKey === resolvedUploadKey))
 		)
 	);
+	let selectedRelease = $derived(
+		releaseVersions.find((release) => release.tagName === selectedReleaseTag)
+	);
+	let canSyncRelease = $derived(
+		Boolean(
+			connectionId &&
+				bucket &&
+				canOperate &&
+				writesAllowed &&
+				releaseSyncConfig.enabled &&
+				selectedReleaseTag
+		)
+	);
 	let canPageBackward = $derived(pageTokens.length > 0);
 	let canPageForward = $derived(Boolean(nextContinuationToken));
 
@@ -104,6 +128,35 @@
 			deleteCandidate = undefined;
 			deleteConfirmKey = '';
 		});
+	}
+
+	async function loadReleaseSync() {
+		if (!connectionId) return;
+		await run(async () => {
+			const config = await api.s3ReleaseSyncConfig(connectionId);
+			releaseSyncConfig = config;
+			releaseSyncSummary = '';
+			if (!config.enabled) {
+				releaseVersions = [];
+				selectedReleaseTag = '';
+				return;
+			}
+			releaseVersions = await api.s3ReleaseVersions(connectionId);
+			if (!releaseVersions.some((release) => release.tagName === selectedReleaseTag)) {
+				selectedReleaseTag = releaseVersions[0]?.tagName ?? '';
+			}
+		});
+	}
+
+	async function syncRelease() {
+		if (!canSyncRelease || !selectedReleaseTag) return;
+		await run(async () => {
+			const result = await api.s3SyncRelease(connectionId, bucket, selectedReleaseTag);
+			releaseSyncSummary = `${result.tagName}: uploaded ${result.uploaded.length}, deleted ${result.deleted}`;
+			prefix = result.targetPrefix;
+			await loadObjects(true);
+			await onAuditRefresh();
+		}, 'Release synced');
 	}
 
 	async function uploadObject() {
@@ -245,6 +298,13 @@
 			void loadObjects(true);
 		}
 	});
+
+	$effect(() => {
+		if (connectionId && releaseLoadedFor !== connectionId) {
+			releaseLoadedFor = connectionId;
+			void loadReleaseSync();
+		}
+	});
 </script>
 
 <section class="workspace">
@@ -278,6 +338,40 @@
 				</div>
 			</Card.Header>
 			<Card.Content>
+				{#if releaseSyncConfig.enabled}
+					<div class="mb-4 border-b pb-4">
+						<div class="flex flex-wrap items-end justify-between gap-3">
+							<div class="min-w-0">
+								<div class="text-sm font-medium">Release sync</div>
+								<div class="text-muted-foreground mt-1 truncate text-xs">
+									{releaseSyncConfig.repository} -> {bucket}/{releaseSyncConfig.targetPrefix}
+								</div>
+							</div>
+							<div class="flex min-w-0 flex-wrap items-center gap-2">
+								<Select.Root type="single" bind:value={selectedReleaseTag}>
+									<Select.Trigger aria-label="GitHub release version" class="w-[220px]">
+										{selectedReleaseTag || 'No releases'}
+									</Select.Trigger>
+									<Select.Content>
+										{#each releaseVersions as release (release.id)}
+											<Select.Item value={release.tagName}>
+												{release.tagName}{release.assetCount ? ` · ${release.assetCount}` : ''}
+											</Select.Item>
+										{/each}
+									</Select.Content>
+								</Select.Root>
+								<Button variant="outline" size="sm" onclick={loadReleaseSync}><RefreshCw class="size-4" /> Versions</Button>
+								<Button size="sm" onclick={syncRelease} disabled={!canSyncRelease}><Upload class="size-4" /> Sync</Button>
+							</div>
+						</div>
+						{#if selectedRelease?.publishedAt || releaseSyncSummary}
+							<div class="text-muted-foreground mt-2 text-xs">
+								{#if selectedRelease?.publishedAt}{selectedRelease.publishedAt}{/if}
+								{#if releaseSyncSummary}{selectedRelease?.publishedAt ? ' · ' : ''}{releaseSyncSummary}{/if}
+							</div>
+						{/if}
+					</div>
+				{/if}
 				<div class="mb-3 grid grid-cols-[1fr_1fr_auto] gap-2">
 					<Input bind:value={uploadKey} placeholder={prefix ? `${prefix}file.ext` : 'file key'} />
 					<Input type="file" onchange={onUploadFileChange} />
