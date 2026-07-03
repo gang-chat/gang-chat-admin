@@ -6,6 +6,7 @@ import { passwordPolicyIssues } from '../modules/auth/password-policy';
 export type ServerConfig = {
 	host: string;
 	port: number;
+	basePath: string;
 	corsOrigin: string[];
 	dataDir: string;
 	agentWorkerToken: string;
@@ -62,6 +63,7 @@ type RawConfig = {
 	mode?: string;
 	host?: string;
 	port?: number;
+	basePath?: string;
 	corsOrigin?: string[];
 	dataDir?: string;
 	agentWorkerToken?: string;
@@ -98,6 +100,7 @@ const DEFAULT_CONFIG = {
 	mode: 'development',
 	host: '127.0.0.1',
 	port: 8787,
+	basePath: '',
 	corsOrigin: ['http://localhost:8787', 'http://127.0.0.1:8787'],
 	dataDir: './.ops-data',
 	logLevel: 'info',
@@ -131,7 +134,10 @@ export async function loadConfig(): Promise<ServerConfig> {
 	}
 
 	const nodeEnv = raw.mode?.trim() || DEFAULT_CONFIG.mode;
-	const dataDir = path.resolve(path.dirname(configPath), raw.dataDir?.trim() || DEFAULT_CONFIG.dataDir);
+	const dataDir = path.resolve(
+		path.dirname(configPath),
+		raw.dataDir?.trim() || DEFAULT_CONFIG.dataDir
+	);
 	await mkdir(dataDir, { recursive: true });
 
 	const adminUsername = requiredString(raw.adminUsername, 'adminUsername');
@@ -147,13 +153,17 @@ export async function loadConfig(): Promise<ServerConfig> {
 	return {
 		host: raw.host?.trim() || DEFAULT_CONFIG.host,
 		port: positiveNumber(raw.port ?? DEFAULT_CONFIG.port, 'port'),
+		basePath: normalizeBasePath(raw.basePath ?? DEFAULT_CONFIG.basePath),
 		corsOrigin,
 		dataDir,
 		agentWorkerToken: requiredString(raw.agentWorkerToken, 'agentWorkerToken'),
 		secretKey: loadSecretKey(requiredString(raw.secretKey, 'secretKey')),
 		nodeEnv,
 		logLevel: raw.logLevel?.trim() || DEFAULT_CONFIG.logLevel,
-		bodyLimitBytes: positiveNumber(raw.bodyLimitBytes ?? DEFAULT_CONFIG.bodyLimitBytes, 'bodyLimitBytes'),
+		bodyLimitBytes: positiveNumber(
+			raw.bodyLimitBytes ?? DEFAULT_CONFIG.bodyLimitBytes,
+			'bodyLimitBytes'
+		),
 		uploadLimitBytes: positiveNumber(
 			raw.uploadLimitBytes ?? DEFAULT_CONFIG.uploadLimitBytes,
 			'uploadLimitBytes'
@@ -161,7 +171,10 @@ export async function loadConfig(): Promise<ServerConfig> {
 		rateLimitMax: positiveNumber(raw.rateLimitMax ?? DEFAULT_CONFIG.rateLimitMax, 'rateLimitMax'),
 		rateLimitWindow: raw.rateLimitWindow?.trim() || DEFAULT_CONFIG.rateLimitWindow,
 		trustProxy: raw.trustProxy ?? DEFAULT_CONFIG.trustProxy,
-		sshMaxSessions: positiveNumber(raw.sshMaxSessions ?? DEFAULT_CONFIG.sshMaxSessions, 'sshMaxSessions'),
+		sshMaxSessions: positiveNumber(
+			raw.sshMaxSessions ?? DEFAULT_CONFIG.sshMaxSessions,
+			'sshMaxSessions'
+		),
 		sshIdleTimeoutMs: positiveNumber(
 			raw.sshIdleTimeoutMs ?? DEFAULT_CONFIG.sshIdleTimeoutMs,
 			'sshIdleTimeoutMs'
@@ -191,7 +204,10 @@ export async function loadConfig(): Promise<ServerConfig> {
 			raw.authMaxFailedLogins ?? DEFAULT_CONFIG.authMaxFailedLogins,
 			'authMaxFailedLogins'
 		),
-		authLockoutMs: positiveNumber(raw.authLockoutMs ?? DEFAULT_CONFIG.authLockoutMs, 'authLockoutMs'),
+		authLockoutMs: positiveNumber(
+			raw.authLockoutMs ?? DEFAULT_CONFIG.authLockoutMs,
+			'authLockoutMs'
+		),
 		aiAdminWorker: normalizeAiAdminWorker(raw.aiAdminWorker),
 		releaseSync: normalizeReleaseSync(raw.releaseSync),
 		connections: normalizeConnections(raw.connections)
@@ -272,6 +288,8 @@ function getConfigPath() {
 		if (!value) throw new Error('--config requires a file path');
 		return value;
 	}
+	if (process.env.GANG_CHAT_ADMIN_CONFIG?.trim()) return process.env.GANG_CHAT_ADMIN_CONFIG.trim();
+	if (process.env.ADMIN_CONFIG?.trim()) return process.env.ADMIN_CONFIG.trim();
 	return 'config.json';
 }
 
@@ -298,6 +316,19 @@ function positiveNumber(value: number | undefined, name: string) {
 		throw new Error(`${name} must be a positive number in config.json`);
 	}
 	return value!;
+}
+
+export function normalizeBasePath(input: string) {
+	const value = input.trim();
+	if (!value || value === '/') return '';
+	if (!value.startsWith('/')) throw new Error('basePath must start with / in config.json');
+	if (value.endsWith('/')) throw new Error('basePath must not end with / in config.json');
+	if (value.length > 128) throw new Error('basePath is too long in config.json');
+	if (hasControlCharacter(value)) throw new Error('basePath cannot contain control characters');
+	if (value.split('/').some((part) => part === '..')) {
+		throw new Error('basePath cannot contain .. path segments');
+	}
+	return value;
 }
 
 function parseGitHubRepository(input: string) {

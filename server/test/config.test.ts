@@ -14,6 +14,7 @@ test('loadConfig reads explicit config file', async () => {
 			const config = await loadConfig();
 			assert.equal(config.bootstrapAdminUser, 'admin');
 			assert.equal(config.bootstrapAdminPassword, 'test-admin-password');
+			assert.equal(config.basePath, '/admin');
 			assert.deepEqual(config.aiAdminWorker, {
 				baseUrl: 'https://llm.example.com/v1',
 				apiKey: 'test-ai-key',
@@ -44,6 +45,7 @@ test('loadConfig applies defaults for operational settings', async () => {
 			assert.equal(config.nodeEnv, 'development');
 			assert.equal(config.host, '127.0.0.1');
 			assert.equal(config.port, 8787);
+			assert.equal(config.basePath, '');
 			assert.equal(config.dataDir, path.join(dir, '.ops-data'));
 			assert.equal(config.rateLimitMax, 600);
 			assert.equal(config.releaseSync, null);
@@ -105,6 +107,7 @@ function baseConfig() {
 		mode: 'test',
 		host: '127.0.0.1',
 		port: 8787,
+		basePath: '/admin',
 		corsOrigin: ['http://localhost:8787'],
 		dataDir: './data',
 		agentWorkerToken: 'test-agent-worker-token',

@@ -88,6 +88,29 @@ GitHub release sync is optional. When configured, the S3 panel can list release 
 }
 ```
 
+If the admin app is mounted below a route prefix, configure it in `config.json`:
+
+```json
+{
+	"basePath": "/admin",
+	"corsOrigin": ["http://ky-z.com"]
+}
+```
+
+With `basePath` set to `/admin`, the same backend process serves the page, API, and WebSocket endpoints under that prefix:
+
+- Page: `/admin/`
+- API: `/admin/api/...`
+- WebSocket: `/admin/ws/...`
+- SvelteKit assets: `/admin/_app/...`
+
+Build the web app with the same config file used at runtime:
+
+```sh
+GANG_CHAT_ADMIN_CONFIG=/path/to/config.json npm run build
+npm run start -- --config /path/to/config.json
+```
+
 ## Run Locally
 
 ```sh
@@ -116,19 +139,6 @@ npm run check:api    # backend TypeScript check
 npm run test:api     # backend tests
 npm run build        # frontend build + API bundle
 ```
-
-## Nginx Route
-
-If the admin app is mounted under `/admin/` on `ky-z.com`, route the app, SvelteKit static assets, API, and WebSocket paths to the same backend process:
-
-```sh
-sudo cp deploy/nginx/gang-chat-admin.conf /etc/nginx/sites-available/gang-chat-admin
-sudo ln -sfn /etc/nginx/sites-available/gang-chat-admin /etc/nginx/sites-enabled/gang-chat-admin
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-Open `http://ky-z.com/admin/`. Keep `corsOrigin` aligned with the browser origin, for example `http://ky-z.com`.
 
 ## Security Notes
 

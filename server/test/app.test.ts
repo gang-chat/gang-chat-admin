@@ -34,6 +34,7 @@ async function withApp(
 	const baseEnv: ServerConfig = {
 		host: '127.0.0.1',
 		port: 0,
+		basePath: '',
 		corsOrigin: ['http://localhost:8787'],
 		dataDir,
 		agentWorkerToken,
@@ -70,7 +71,7 @@ async function withApp(
 	try {
 		const login = await app.inject({
 			method: 'POST',
-			url: '/api/auth/login',
+			url: apiPath(env, '/api/auth/login'),
 			payload: { username: 'admin', password: 'test-admin-password' }
 		});
 		const token = login.json().data.token as string;
@@ -79,6 +80,10 @@ async function withApp(
 		await app.close();
 		await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
 	}
+}
+
+function apiPath(env: ServerConfig, path: string) {
+	return `${env.basePath}${path}`;
 }
 
 function nextJsonMessage(socket: TestWebSocket, label = 'WebSocket message') {
@@ -225,6 +230,22 @@ test('API requires bearer auth outside health endpoint', async () => {
 		assert.equal(denied.json().error.code, 'UNAUTHORIZED');
 		assert.equal(deniedDownload.statusCode, 401);
 	});
+});
+
+test('basePath scopes backend API routes', async () => {
+	await withApp(
+		async ({ app }) => {
+			const health = await app.inject({ method: 'GET', url: '/admin/api/health' });
+			const rootHealth = await app.inject({ method: 'GET', url: '/api/health' });
+			const denied = await app.inject({ method: 'GET', url: '/admin/api/connections' });
+
+			assert.equal(health.statusCode, 200);
+			assert.equal(rootHealth.statusCode, 404);
+			assert.equal(denied.statusCode, 401);
+			assert.equal(denied.json().error.code, 'UNAUTHORIZED');
+		},
+		{ basePath: '/admin' }
+	);
 });
 
 test('session login can access admin APIs and logout revokes the session', async () => {
@@ -1959,10 +1980,7 @@ test('S3 writes are blocked unless the preset explicitly allows writes', async (
 test('S3 release sync lists configured GitHub releases', async () => {
 	const previousFetch = globalThis.fetch;
 	globalThis.fetch = (async (input) => {
-		assert.equal(
-			String(input),
-			'https://api.github.com/repos/LoganZ2/gang-chat-admin/releases'
-		);
+		assert.equal(String(input), 'https://api.github.com/repos/LoganZ2/gang-chat-admin/releases');
 		return new Response(
 			JSON.stringify([
 				{

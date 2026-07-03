@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Eraser, Plug, PlugZap, RotateCw } from '@lucide/svelte';
 	import { onDestroy, onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import { Button } from '$lib/components/ui/button';
 	import type { ApiClient } from '$lib/api/client';
 
@@ -181,7 +182,7 @@
 
 	function workerTerminalSocketUrl(workerId: string, ticket: string, cols: number, rows: number) {
 		const url = new URL(
-			`/ws/agent/workers/${encodeURIComponent(workerId)}/terminal`,
+			`${base}/ws/agent/workers/${encodeURIComponent(workerId)}/terminal`,
 			window.location.href
 		);
 		url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';

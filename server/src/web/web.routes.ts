@@ -13,13 +13,13 @@ type NodeMiddleware = (
 export async function registerWebRoutes(app: FastifyInstance, env: ServerConfig) {
 	if (env.nodeEnv === 'test') return;
 	if (env.nodeEnv === 'development') {
-		await registerViteWebRoutes(app);
+		await registerViteWebRoutes(app, env);
 		return;
 	}
-	await registerBuiltWebRoutes(app);
+	await registerBuiltWebRoutes(app, env);
 }
 
-async function registerViteWebRoutes(app: FastifyInstance) {
+async function registerViteWebRoutes(app: FastifyInstance, env: ServerConfig) {
 	const { createServer } = await import('vite');
 	const vite = await createServer({
 		root: process.cwd(),
@@ -29,7 +29,7 @@ async function registerViteWebRoutes(app: FastifyInstance) {
 			},
 			ws: {
 				server: app.server,
-				path: '/__vite_ws'
+				path: env.basePath ? `${env.basePath}/__vite_ws` : '/__vite_ws'
 			}
 		}
 	});
@@ -38,21 +38,34 @@ async function registerViteWebRoutes(app: FastifyInstance) {
 		await vite.close();
 	});
 
-	registerNodeMiddleware(app, vite.middlewares as NodeMiddleware);
+	registerNodeMiddleware(app, vite.middlewares as NodeMiddleware, env.basePath);
 }
 
-async function registerBuiltWebRoutes(app: FastifyInstance) {
+async function registerBuiltWebRoutes(app: FastifyInstance, env: ServerConfig) {
 	const handlerPath = pathToFileURL(path.resolve(process.cwd(), 'build/handler.js')).href;
 	const { handler } = (await import(handlerPath)) as { handler: NodeMiddleware };
-	registerNodeMiddleware(app, handler);
+	registerNodeMiddleware(app, handler, env.basePath);
 }
 
-function registerNodeMiddleware(app: FastifyInstance, middleware: NodeMiddleware) {
+function registerNodeMiddleware(
+	app: FastifyInstance,
+	middleware: NodeMiddleware,
+	basePath: string
+) {
+	if (basePath) {
+		app.route({
+			method: ['GET', 'HEAD'],
+			url: basePath,
+			handler: (_request, reply) => {
+				reply.redirect(`${basePath}/`);
+			}
+		});
+	}
 	app.route({
 		method: ['GET', 'HEAD'],
-		url: '/*',
+		url: basePath ? `${basePath}/*` : '/*',
 		handler: (request, reply) => {
-			if (isBackendRoute(request.url)) {
+			if (isBackendRoute(request.url, basePath)) {
 				reply.callNotFound();
 				return;
 			}
@@ -92,6 +105,10 @@ function sendFallback(response: ServerResponse, statusCode: number, message: str
 	response.end(message);
 }
 
-function isBackendRoute(url: string) {
-	return url.startsWith('/api/') || url === '/api' || url.startsWith('/ws/');
+function isBackendRoute(url: string, basePath: string) {
+	const logicalUrl =
+		basePath && (url === basePath || url.startsWith(`${basePath}/`))
+			? url.slice(basePath.length) || '/'
+			: url;
+	return logicalUrl.startsWith('/api/') || logicalUrl === '/api' || logicalUrl.startsWith('/ws/');
 }

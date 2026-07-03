@@ -1,21 +1,18 @@
 <script lang="ts">
 	import { Bot, Database, HardDrive, RefreshCw, Wallet } from '@lucide/svelte';
 	import { onMount } from 'svelte';
+	import { base } from '$app/paths';
 	import { ApiClient, ApiClientError } from '$lib/api/client';
 	import AgentPanel from '$lib/components/ops/AgentPanel.svelte';
 	import ExpensesPanel from '$lib/components/ops/ExpensesPanel.svelte';
 	import MysqlWorkbench from '$lib/components/ops/MysqlWorkbench.svelte';
 	import S3Browser from '$lib/components/ops/S3Browser.svelte';
 	import type { RunTask } from '$lib/components/ops/types';
-	import type {
-		AuthRole,
-		AuthUser,
-		ConnectionPreset
-	} from '$lib/shared/ops-types';
+	import type { AuthRole, AuthUser, ConnectionPreset } from '$lib/shared/ops-types';
 
 	type View = 'mysql' | 's3' | 'expenses' | 'agent';
 
-	const apiBase = '';
+	const apiBase = base;
 
 	let token = $state('');
 	let actor = $state('');
@@ -168,7 +165,8 @@
 				autocomplete="username"
 			/>
 
-			<label class="mt-4 block text-sm font-medium text-zinc-700" for="ops-password">Password</label>
+			<label class="mt-4 block text-sm font-medium text-zinc-700" for="ops-password">Password</label
+			>
 			<input
 				id="ops-password"
 				class="mt-1 h-10 w-full rounded-md border-zinc-300 text-sm"
@@ -189,57 +187,59 @@
 			</button>
 
 			{#if message}
-				<div class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+				<div
+					class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+				>
 					{message}
 				</div>
 			{/if}
 		</section>
 	</main>
 {:else}
-<main class="ops-page-bg min-h-screen space-y-8 px-4 py-4 pr-24 pb-16 text-foreground sm:px-6 sm:pr-28">
-	{#if message}
-		<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-			{message}
-		</div>
-	{/if}
+	<main
+		class="ops-page-bg min-h-screen space-y-8 px-4 py-4 pr-24 pb-16 text-foreground sm:px-6 sm:pr-28"
+	>
+		{#if message}
+			<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+				{message}
+			</div>
+		{/if}
 
-	<section id="mysql" class="scroll-mt-6">
-		<MysqlWorkbench
-			{api}
-			{mysqlConnections}
-			{run}
-		/>
-	</section>
+		<section id="mysql" class="scroll-mt-6">
+			<MysqlWorkbench {api} {mysqlConnections} {run} />
+		</section>
 
-	<section id="s3" class="scroll-mt-6">
-		<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
-	</section>
+		<section id="s3" class="scroll-mt-6">
+			<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
+		</section>
 
-	<section id="agent" class="scroll-mt-6">
-		<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
-	</section>
+		<section id="agent" class="scroll-mt-6">
+			<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
+		</section>
 
-	<section id="expenses" class="scroll-mt-6">
-		<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
-	</section>
+		<section id="expenses" class="scroll-mt-6">
+			<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
+		</section>
 
-	<aside class="wheel-rail" aria-label="Page navigation">
-		<div class="floating-wheel">
-			{#each navItems as item (item.id)}
-				{@const Icon = item.icon}
-				<button
-					class="wheel-button {activeSection === item.id ? 'active' : ''}"
-					title={item.label}
-					onclick={() => scrollToSection(item.id)}
-				>
-					<Icon class="size-4" />
+		<aside class="wheel-rail" aria-label="Page navigation">
+			<div class="floating-wheel">
+				{#each navItems as item (item.id)}
+					{@const Icon = item.icon}
+					<button
+						class="wheel-button {activeSection === item.id ? 'active' : ''}"
+						title={item.label}
+						onclick={() => scrollToSection(item.id)}
+					>
+						<Icon class="size-4" />
+					</button>
+				{/each}
+				<button class="wheel-button" title="Refresh" onclick={refreshAll} disabled={busy}>
+					<RefreshCw class="size-4 {busy ? 'animate-spin' : ''}" />
 				</button>
-			{/each}
-			<button class="wheel-button" title="Refresh" onclick={refreshAll} disabled={busy}>
-				<RefreshCw class="size-4 {busy ? 'animate-spin' : ''}" />
-			</button>
-			<button class="wheel-button wheel-exit" title={`Sign out ${actor}`} onclick={logout}>×</button>
-		</div>
-	</aside>
-</main>
+				<button class="wheel-button wheel-exit" title={`Sign out ${actor}`} onclick={logout}
+					>×</button
+				>
+			</div>
+		</aside>
+	</main>
 {/if}
