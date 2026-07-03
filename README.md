@@ -117,6 +117,19 @@ npm run test:api     # backend tests
 npm run build        # frontend build + API bundle
 ```
 
+## Nginx Route
+
+If the admin app is mounted under `/admin/` on `ky-z.com`, route the app, SvelteKit static assets, API, and WebSocket paths to the same backend process:
+
+```sh
+sudo cp deploy/nginx/gang-chat-admin.conf /etc/nginx/sites-available/gang-chat-admin
+sudo ln -sfn /etc/nginx/sites-available/gang-chat-admin /etc/nginx/sites-enabled/gang-chat-admin
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Open `http://ky-z.com/admin/`. Keep `corsOrigin` aligned with the browser origin, for example `http://ky-z.com`.
+
 ## Security Notes
 
 - Do not expose the API without TLS.
