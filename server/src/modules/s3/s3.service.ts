@@ -61,7 +61,7 @@ export class S3Service {
 			repository: `${this.releaseSync.owner}/${this.releaseSync.repo}`,
 			repositoryUrl: this.releaseSync.repositoryUrl,
 			targetPrefix: this.releaseSync.targetPrefix,
-			assetNames: this.releaseSync.assetNames
+			assetPrefix: this.releaseSync.assetPrefix
 		};
 	}
 
@@ -98,7 +98,7 @@ export class S3Service {
 			`/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/releases/tags/${encodeURIComponent(safeTag)}`
 		);
 		const assets = release.assets ?? [];
-		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetNames, release.tag_name);
+		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetPrefix, release.tag_name);
 		if (selectedAssets.length === 0) {
 			throw new HttpError(
 				400,
@@ -427,12 +427,12 @@ export class S3Service {
 }
 
 function syncableAssetCount(assets: GitHubReleaseAsset[]) {
-	return selectReleaseAssetsForSync(assets, { dmg: 'x.dmg', exe: 'x.exe' }).length;
+	return selectReleaseAssetsForSync(assets, 'x').length;
 }
 
 export function selectReleaseAssetsForSync<T extends { name: string }>(
 	assets: T[],
-	outputNames: { dmg: string; exe: string },
+	assetPrefix: string,
 	tagName?: string
 ) {
 	const selected: Array<{ asset: T; outputName: string }> = [];
@@ -442,12 +442,12 @@ export function selectReleaseAssetsForSync<T extends { name: string }>(
 	for (const asset of assets) {
 		const name = asset.name.trim().toLowerCase();
 		if (!hasDmg && name.endsWith('.dmg')) {
-			selected.push({ asset, outputName: versionedAssetName(outputNames.dmg, tagName) });
+			selected.push({ asset, outputName: versionedAssetName(assetPrefix, tagName, '.dmg') });
 			hasDmg = true;
 			continue;
 		}
 		if (!hasExe && name.endsWith('.exe')) {
-			selected.push({ asset, outputName: versionedAssetName(outputNames.exe, tagName) });
+			selected.push({ asset, outputName: versionedAssetName(assetPrefix, tagName, '.exe') });
 			hasExe = true;
 		}
 		if (hasDmg && hasExe) break;
@@ -456,13 +456,10 @@ export function selectReleaseAssetsForSync<T extends { name: string }>(
 	return selected;
 }
 
-function versionedAssetName(fileName: string, tagName?: string) {
-	const safeFileName = validateObjectKey(fileName);
-	if (!tagName?.trim()) return safeFileName;
-	const dot = safeFileName.lastIndexOf('.');
-	const base = dot > 0 ? safeFileName.slice(0, dot) : safeFileName;
-	const extension = dot > 0 ? safeFileName.slice(dot) : '';
-	return validateObjectKey(`${base}_${safeVersionTag(tagName)}${extension}`);
+function versionedAssetName(assetPrefix: string, tagName: string | undefined, extension: '.dmg' | '.exe') {
+	const safePrefix = validateObjectKey(assetPrefix);
+	const version = tagName?.trim() ? `_${safeVersionTag(tagName)}` : '';
+	return validateObjectKey(`${safePrefix}${version}${extension}`);
 }
 
 function safeVersionTag(tagName: string) {

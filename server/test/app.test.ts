@@ -2008,10 +2008,7 @@ test('S3 release sync lists configured GitHub releases', async () => {
 				assert.equal(config.json().data.enabled, true);
 				assert.equal(config.json().data.repository, 'LoganZ2/gang-chat-admin');
 				assert.equal(config.json().data.targetPrefix, 'releases/current/');
-				assert.deepEqual(config.json().data.assetNames, {
-					dmg: 'GangChat.dmg',
-					exe: 'GangChat.exe'
-				});
+				assert.equal(config.json().data.assetPrefix, 'GangChat');
 				assert.equal(releases.statusCode, 200);
 				assert.deepEqual(releases.json().data, [
 					{
@@ -2032,10 +2029,7 @@ test('S3 release sync lists configured GitHub releases', async () => {
 					owner: 'LoganZ2',
 					repo: 'gang-chat-admin',
 					targetPrefix: 'releases/current/',
-					assetNames: {
-						dmg: 'GangChat.dmg',
-						exe: 'GangChat.exe'
-					}
+					assetPrefix: 'GangChat'
 				}
 			}
 		);

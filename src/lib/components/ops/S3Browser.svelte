@@ -346,9 +346,9 @@
 								<div class="text-muted-foreground mt-1 truncate text-xs">
 									{releaseSyncConfig.repository} -> {bucket}/{releaseSyncConfig.targetPrefix}
 								</div>
-								{#if releaseSyncConfig.assetNames}
+								{#if releaseSyncConfig.assetPrefix}
 									<div class="text-muted-foreground mt-1 truncate text-xs">
-										{releaseSyncConfig.assetNames.dmg} / {releaseSyncConfig.assetNames.exe}
+										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe
 									</div>
 								{/if}
 							</div>

@@ -24,10 +24,7 @@ test('loadConfig reads explicit config file', async () => {
 				owner: 'LoganZ2',
 				repo: 'gang-chat-admin',
 				targetPrefix: 'releases/current/',
-				assetNames: {
-					dmg: 'GangChat.dmg',
-					exe: 'GangChat.exe'
-				},
+				assetPrefix: 'GangChat',
 				githubToken: undefined
 			});
 			assert.equal(config.connections.ssh.length, 0);
@@ -138,10 +135,7 @@ function baseConfig() {
 		releaseSync: {
 			repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
 			targetPrefix: 'releases/current',
-			assetNames: {
-				dmg: 'GangChat.dmg',
-				exe: 'GangChat.exe'
-			}
+			assetPrefix: 'GangChat'
 		},
 		connections: { mysql: null, s3: null, ssh: [] }
 	};

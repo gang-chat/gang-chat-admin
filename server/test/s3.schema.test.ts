@@ -111,7 +111,7 @@ test('S3 release sync selects first dmg and exe with configured names', () => {
 			{ name: 'win-a.exe' },
 			{ name: 'win-b.exe' }
 		],
-		{ dmg: 'GangChat.dmg', exe: 'GangChat.exe' },
+		'GangChat',
 		'v1.2.3'
 	);
 

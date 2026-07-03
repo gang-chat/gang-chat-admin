@@ -82,10 +82,7 @@ GitHub release sync is optional. When configured, the S3 panel can list release 
 	"releaseSync": {
 		"repositoryUrl": "https://github.com/owner/repo",
 		"targetPrefix": "releases/current/",
-		"assetNames": {
-			"dmg": "GangChat.dmg",
-			"exe": "GangChat.exe"
-		},
+		"assetPrefix": "GangChat",
 		"githubToken": "optional-for-private-repos"
 	}
 }
