@@ -102,14 +102,16 @@ test('S3 not-found helper recognizes common SDK not-found shapes', () => {
 	);
 });
 
-test('S3 release sync selects first dmg and exe with configured names', () => {
+test('S3 release sync selects first dmg, exe, and apk with configured names', () => {
 	const selected = selectReleaseAssetsForSync(
 		[
 			{ name: 'app.zip' },
 			{ name: 'mac-a.dmg' },
 			{ name: 'mac-b.dmg' },
 			{ name: 'win-a.exe' },
-			{ name: 'win-b.exe' }
+			{ name: 'win-b.exe' },
+			{ name: 'android-a.APK' },
+			{ name: 'android-b.apk' }
 		],
 		'GangChat',
 		'v1.2.3'
@@ -119,7 +121,8 @@ test('S3 release sync selects first dmg and exe with configured names', () => {
 		selected.map((item) => ({ source: item.asset.name, output: item.outputName })),
 		[
 			{ source: 'mac-a.dmg', output: 'GangChat_v1.2.3.dmg' },
-			{ source: 'win-a.exe', output: 'GangChat_v1.2.3.exe' }
+			{ source: 'win-a.exe', output: 'GangChat_v1.2.3.exe' },
+			{ source: 'android-a.APK', output: 'GangChat_v1.2.3.apk' }
 		]
 	);
 });

@@ -88,6 +88,9 @@ GitHub release sync is optional. When configured, the S3 panel can list release 
 }
 ```
 
+The sync selects the first `.dmg`, `.exe`, and `.apk` asset from the release and stores them as
+`<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and `<assetPrefix>_<tag>.apk`.
+
 If the admin app is mounted below a route prefix, configure it in `config.json`:
 
 ```json

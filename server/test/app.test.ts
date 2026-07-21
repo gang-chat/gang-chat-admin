@@ -1995,7 +1995,8 @@ test('S3 release sync lists configured GitHub releases', async () => {
 						{ id: 1, name: 'app-mac-a.dmg', size: 12, url: 'https://api.github.com/assets/1' },
 						{ id: 2, name: 'app-mac-b.dmg', size: 13, url: 'https://api.github.com/assets/2' },
 						{ id: 3, name: 'app-win-a.exe', size: 14, url: 'https://api.github.com/assets/3' },
-						{ id: 4, name: 'app.zip', size: 15, url: 'https://api.github.com/assets/4' }
+						{ id: 4, name: 'app.zip', size: 15, url: 'https://api.github.com/assets/4' },
+						{ id: 5, name: 'app-android.apk', size: 16, url: 'https://api.github.com/assets/5' }
 					]
 				},
 				{
@@ -2036,7 +2037,7 @@ test('S3 release sync lists configured GitHub releases', async () => {
 						htmlUrl: 'https://github.com/LoganZ2/gang-chat-admin/releases/tag/v1.2.3',
 						publishedAt: '2026-07-03T00:00:00Z',
 						prerelease: false,
-						assetCount: 2
+						assetCount: 3
 					}
 				]);
 			},

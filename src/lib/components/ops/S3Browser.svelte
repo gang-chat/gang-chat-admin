@@ -348,7 +348,7 @@
 								</div>
 								{#if releaseSyncConfig.assetPrefix}
 									<div class="text-muted-foreground mt-1 truncate text-xs">
-										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe
+										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.apk
 									</div>
 								{/if}
 							</div>

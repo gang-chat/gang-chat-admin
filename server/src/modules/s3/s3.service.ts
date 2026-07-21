@@ -103,7 +103,7 @@ export class S3Service {
 			throw new HttpError(
 				400,
 				'GITHUB_RELEASE_HAS_NO_SUPPORTED_ASSETS',
-				'Selected release has no .dmg or .exe assets'
+				'Selected release has no .dmg, .exe, or .apk assets'
 			);
 		}
 
@@ -117,7 +117,11 @@ export class S3Service {
 				accept: 'application/octet-stream'
 			});
 			if (!response.body) {
-				throw new HttpError(502, 'GITHUB_ASSET_DOWNLOAD_FAILED', `GitHub asset is empty: ${asset.name}`);
+				throw new HttpError(
+					502,
+					'GITHUB_ASSET_DOWNLOAD_FAILED',
+					`GitHub asset is empty: ${asset.name}`
+				);
 			}
 			await new Upload({
 				client,
@@ -430,40 +434,45 @@ function syncableAssetCount(assets: GitHubReleaseAsset[]) {
 	return selectReleaseAssetsForSync(assets, 'x').length;
 }
 
+const releaseAssetExtensions = ['.dmg', '.exe', '.apk'] as const;
+type ReleaseAssetExtension = (typeof releaseAssetExtensions)[number];
+
 export function selectReleaseAssetsForSync<T extends { name: string }>(
 	assets: T[],
 	assetPrefix: string,
 	tagName?: string
 ) {
 	const selected: Array<{ asset: T; outputName: string }> = [];
-	let hasDmg = false;
-	let hasExe = false;
+	const selectedExtensions = new Set<ReleaseAssetExtension>();
 
 	for (const asset of assets) {
 		const name = asset.name.trim().toLowerCase();
-		if (!hasDmg && name.endsWith('.dmg')) {
-			selected.push({ asset, outputName: versionedAssetName(assetPrefix, tagName, '.dmg') });
-			hasDmg = true;
-			continue;
-		}
-		if (!hasExe && name.endsWith('.exe')) {
-			selected.push({ asset, outputName: versionedAssetName(assetPrefix, tagName, '.exe') });
-			hasExe = true;
-		}
-		if (hasDmg && hasExe) break;
+		const extension = releaseAssetExtensions.find((candidate) => name.endsWith(candidate));
+		if (!extension || selectedExtensions.has(extension)) continue;
+
+		selected.push({ asset, outputName: versionedAssetName(assetPrefix, tagName, extension) });
+		selectedExtensions.add(extension);
+		if (selectedExtensions.size === releaseAssetExtensions.length) break;
 	}
 
 	return selected;
 }
 
-function versionedAssetName(assetPrefix: string, tagName: string | undefined, extension: '.dmg' | '.exe') {
+function versionedAssetName(
+	assetPrefix: string,
+	tagName: string | undefined,
+	extension: ReleaseAssetExtension
+) {
 	const safePrefix = validateObjectKey(assetPrefix);
 	const version = tagName?.trim() ? `_${safeVersionTag(tagName)}` : '';
 	return validateObjectKey(`${safePrefix}${version}${extension}`);
 }
 
 function safeVersionTag(tagName: string) {
-	const safe = tagName.trim().replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+	const safe = tagName
+		.trim()
+		.replace(/[^A-Za-z0-9._-]+/g, '-')
+		.replace(/^-+|-+$/g, '');
 	return safe || 'release';
 }
 
