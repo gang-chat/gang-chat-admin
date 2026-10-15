@@ -99,7 +99,9 @@ export class S3Service {
 		);
 		const assets = release.assets ?? [];
 		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetPrefix, release.tag_name);
-		if (selectedAssets.length === 0) {
+		const installers = selectedAssets.filter((item) => item.outputName !== sparkleAppcastName);
+		const appcast = selectedAssets.find((item) => item.outputName === sparkleAppcastName);
+		if (installers.length === 0) {
 			throw new HttpError(
 				400,
 				'GITHUB_RELEASE_HAS_NO_SUPPORTED_ASSETS',
@@ -107,11 +109,30 @@ export class S3Service {
 			);
 		}
 
+		// Read and check the appcast before clearing anything, so a release whose
+		// appcast points elsewhere leaves the bucket as it was.
+		let appcastBody: Buffer | undefined;
+		if (appcast) {
+			const dmg = installers.find((item) => item.outputName.toLowerCase().endsWith('.dmg'));
+			const dmgKey = dmg ? `${config.targetPrefix}${dmg.outputName}` : undefined;
+			const response = await this.githubFetch(appcast.asset.url, {
+				accept: 'application/octet-stream'
+			});
+			appcastBody = Buffer.from(await response.arrayBuffer());
+			if (!dmgKey || !appcastPointsAtKey(appcastBody.toString('utf8'), dmgKey)) {
+				throw new HttpError(
+					400,
+					'RELEASE_APPCAST_MISMATCH',
+					`appcast.xml must download ${dmgKey ?? 'a .dmg from the same release'}`
+				);
+			}
+		}
+
 		const client = await this.client(connectionId);
 		const deleted = await this.clearPrefix(client, safeBucket, config.targetPrefix);
 		const uploaded: S3ReleaseSyncResult['uploaded'] = [];
 
-		for (const { asset, outputName } of selectedAssets) {
+		for (const { asset, outputName } of installers) {
 			const key = `${config.targetPrefix}${outputName}`;
 			const response = await this.githubFetch(asset.url, {
 				accept: 'application/octet-stream'
@@ -143,6 +164,33 @@ export class S3Service {
 				key,
 				size: asset.size,
 				contentType: asset.content_type || response.headers.get('content-type') || undefined
+			});
+		}
+
+		if (appcast && appcastBody) {
+			const key = `${config.targetPrefix}${sparkleAppcastName}`;
+			await new Upload({
+				client,
+				params: {
+					Bucket: safeBucket,
+					Key: key,
+					Body: appcastBody,
+					ContentType: 'application/xml',
+					// Installed apps must see a new appcast as soon as it lands.
+					CacheControl: 'no-cache',
+					Metadata: {
+						'github-repository': `${config.owner}/${config.repo}`,
+						'github-release-tag': release.tag_name,
+						'github-asset-id': String(appcast.asset.id)
+					}
+				}
+			}).done();
+			uploaded.push({
+				name: sparkleAppcastName,
+				sourceName: appcast.asset.name,
+				key,
+				size: appcastBody.length,
+				contentType: 'application/xml'
 			});
 		}
 
@@ -455,7 +503,35 @@ export function selectReleaseAssetsForSync<T extends { name: string }>(
 		if (selectedExtensions.size === releaseAssetExtensions.length) break;
 	}
 
+	// The macOS app's Sparkle updater reads appcast.xml under its fixed name.
+	// It goes last because it points at the DMG, which must already be in
+	// place when installed apps see the new appcast.
+	const appcast = assets.find((asset) => asset.name.trim().toLowerCase() === sparkleAppcastName);
+	if (appcast) selected.push({ asset: appcast, outputName: sparkleAppcastName });
+
 	return selected;
+}
+
+export const sparkleAppcastName = 'appcast.xml';
+
+/**
+ * Whether every update in a Sparkle appcast downloads from `key`, so a synced
+ * appcast never offers an installer that the same sync didn't upload.
+ */
+export function appcastPointsAtKey(appcastXml: string, key: string) {
+	const urls = [...appcastXml.matchAll(/<enclosure\b[^>]*\burl="([^"]+)"/g)].map(
+		(match) => match[1]
+	);
+	return (
+		urls.length > 0 &&
+		urls.every((url) => {
+			try {
+				return decodeURIComponent(new URL(url).pathname).endsWith(`/${key}`);
+			} catch {
+				return false;
+			}
+		})
+	);
 }
 
 function versionedAssetName(

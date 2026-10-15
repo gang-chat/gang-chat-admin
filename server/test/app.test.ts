@@ -1,9 +1,10 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import type { RawData } from 'ws';
+import { S3Client } from '@aws-sdk/client-s3';
 import { buildApp } from '../src/app';
 import type { ServerConfig } from '../src/config/config';
 import type { AgentOpsRun, AgentWorkerStatus } from '../../src/lib/shared/ops-types';
@@ -2053,6 +2054,123 @@ test('S3 release sync lists configured GitHub releases', async () => {
 			}
 		);
 	} finally {
+		globalThis.fetch = previousFetch;
+	}
+});
+
+function releaseSyncFetch(appcastXml: string): typeof fetch {
+	const assets = [
+		// Listed first on purpose: the sync must still upload it last.
+		{ id: 9, name: 'appcast.xml', size: appcastXml.length, url: 'https://api.github.com/assets/9' },
+		{ id: 1, name: 'GangChat_v1.2.3.dmg', size: 3, url: 'https://api.github.com/assets/1' },
+		{ id: 2, name: 'GangChat_v1.2.3.exe', size: 3, url: 'https://api.github.com/assets/2' },
+		{ id: 3, name: 'GangChat_v1.2.3.apk', size: 3, url: 'https://api.github.com/assets/3' }
+	];
+	return (async (input) => {
+		const url = String(input);
+		if (url.endsWith('/releases/tags/v1.2.3')) {
+			return Response.json({ id: 101, tag_name: 'v1.2.3', assets });
+		}
+		if (url === 'https://api.github.com/assets/9') return new Response(appcastXml);
+		if (url.startsWith('https://api.github.com/assets/')) return new Response('bin');
+		throw new Error(`unexpected fetch ${url}`);
+	}) as typeof fetch;
+}
+
+function recordS3Commands() {
+	const sent: Array<{ command: string; input: Record<string, unknown> }> = [];
+	const send = mock.method(S3Client.prototype, 'send', async (command: unknown) => {
+		const { constructor, input } = command as {
+			constructor: { name: string };
+			input: Record<string, unknown>;
+		};
+		sent.push({ command: constructor.name, input });
+		if (constructor.name === 'ListObjectsV2Command') {
+			return {
+				Contents: [{ Key: 'releases/GangChat_v1.2.2.dmg' }, { Key: 'releases/appcast.xml' }]
+			};
+		}
+		return { ETag: '"etag"' };
+	});
+	return { sent, restore: () => send.mock.restore() };
+}
+
+const releaseSyncEnv = {
+	connections: s3Connections(true),
+	releaseSync: {
+		repositoryUrl: 'https://github.com/gang-chat/gang-chat-client',
+		owner: 'gang-chat',
+		repo: 'gang-chat-client',
+		targetPrefix: 'releases/',
+		assetPrefix: 'GangChat'
+	}
+};
+
+const appcastFor = (dmgUrl: string) =>
+	`<?xml version="1.0"?><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"><channel><item>` +
+	`<enclosure url="${dmgUrl}" type="application/octet-stream" sparkle:edSignature="sig" length="3"/>` +
+	`</item></channel></rss>`;
+
+test('S3 release sync uploads installers before the Sparkle appcast', async () => {
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = releaseSyncFetch(
+		appcastFor('https://os.ky-z.com:9000/gang-chat/releases/GangChat_v1.2.3.dmg')
+	);
+	const s3 = recordS3Commands();
+	try {
+		await withApp(async ({ app, token }) => {
+			const response = await app.inject({
+				method: 'POST',
+				url: '/api/s3/write-s3/release-sync',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { bucket: 'gang-chat', tagName: 'v1.2.3' }
+			});
+
+			assert.equal(response.statusCode, 200);
+			assert.equal(response.json().data.deleted, 2);
+			assert.deepEqual(
+				s3.sent.map(({ command, input }) => `${command} ${input.Key ?? input.Prefix}`),
+				[
+					'ListObjectsV2Command releases/',
+					'DeleteObjectCommand releases/GangChat_v1.2.2.dmg',
+					'DeleteObjectCommand releases/appcast.xml',
+					'PutObjectCommand releases/GangChat_v1.2.3.dmg',
+					'PutObjectCommand releases/GangChat_v1.2.3.exe',
+					'PutObjectCommand releases/GangChat_v1.2.3.apk',
+					'PutObjectCommand releases/appcast.xml'
+				]
+			);
+			const appcastPut = s3.sent.at(-1)!.input;
+			assert.equal(appcastPut.ContentType, 'application/xml');
+			assert.equal(appcastPut.CacheControl, 'no-cache');
+		}, releaseSyncEnv);
+	} finally {
+		s3.restore();
+		globalThis.fetch = previousFetch;
+	}
+});
+
+test('S3 release sync leaves the bucket alone when the appcast points elsewhere', async () => {
+	const previousFetch = globalThis.fetch;
+	globalThis.fetch = releaseSyncFetch(
+		appcastFor('https://os.ky-z.com:9000/gang-chat/releases/GangChat_v1.2.2.dmg')
+	);
+	const s3 = recordS3Commands();
+	try {
+		await withApp(async ({ app, token }) => {
+			const response = await app.inject({
+				method: 'POST',
+				url: '/api/s3/write-s3/release-sync',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { bucket: 'gang-chat', tagName: 'v1.2.3' }
+			});
+
+			assert.equal(response.statusCode, 400);
+			assert.equal(response.json().error.code, 'RELEASE_APPCAST_MISMATCH');
+			assert.deepEqual(s3.sent, []);
+		}, releaseSyncEnv);
+	} finally {
+		s3.restore();
 		globalThis.fetch = previousFetch;
 	}
 });

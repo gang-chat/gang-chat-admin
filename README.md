@@ -88,8 +88,15 @@ GitHub release sync is optional. When configured, the S3 panel can list release 
 }
 ```
 
-The sync selects the first `.dmg`, `.exe`, and `.apk` asset from the release and stores them as
-`<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and `<assetPrefix>_<tag>.apk`.
+The sync clears the target prefix, then selects the first `.dmg`, `.exe`, and `.apk` asset from the
+release and stores them as `<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and
+`<assetPrefix>_<tag>.apk`.
+
+If the release also has an `appcast.xml` (the macOS client's Sparkle update feed), it is uploaded
+last under that fixed name, with `Content-Type: application/xml` and `Cache-Control: no-cache`.
+Before anything is cleared, the sync checks that every update in the appcast downloads the
+`.dmg` this sync uploads (`<targetPrefix><assetPrefix>_<tag>.dmg`); if not, it fails with
+`RELEASE_APPCAST_MISMATCH` and leaves the bucket unchanged.
 
 If the admin app is mounted below a route prefix, configure it in `config.json`:
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	isS3NotFoundError,
+	appcastPointsAtKey,
 	selectReleaseAssetsForSync,
 	validateBucketName,
 	validateObjectKey
@@ -125,4 +126,45 @@ test('S3 release sync selects first dmg, exe, and apk with configured names', ()
 			{ source: 'android-a.APK', output: 'GangChat_v1.2.3.apk' }
 		]
 	);
+});
+
+test('S3 release sync uploads the Sparkle appcast last under its fixed name', () => {
+	const selected = selectReleaseAssetsForSync(
+		[
+			{ name: 'appcast.xml' },
+			{ name: 'GangChat_v1.2.3.dmg' },
+			{ name: 'GangChat_v1.2.3.exe' },
+			{ name: 'GangChat_v1.2.3.apk' }
+		],
+		'GangChat',
+		'v1.2.3'
+	);
+
+	assert.deepEqual(
+		selected.map((item) => item.outputName),
+		['GangChat_v1.2.3.dmg', 'GangChat_v1.2.3.exe', 'GangChat_v1.2.3.apk', 'appcast.xml']
+	);
+});
+
+test('Sparkle appcast check requires every enclosure to download the synced DMG', () => {
+	const appcast = (url: string) =>
+		`<rss><channel><item><enclosure url="${url}" sparkle:edSignature="x" length="1"/></item></channel></rss>`;
+	const key = 'releases/GangChat_v1.2.3.dmg';
+
+	assert.equal(
+		appcastPointsAtKey(
+			appcast('https://os.ky-z.com:9000/gang-chat/releases/GangChat_v1.2.3.dmg'),
+			key
+		),
+		true
+	);
+	assert.equal(
+		appcastPointsAtKey(
+			appcast('https://os.ky-z.com:9000/gang-chat/releases/GangChat_v1.2.2.dmg'),
+			key
+		),
+		false
+	);
+	assert.equal(appcastPointsAtKey('<rss><channel/></rss>', key), false);
+	assert.equal(appcastPointsAtKey(appcast('not a url'), key), false);
 });
