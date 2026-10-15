@@ -28,7 +28,7 @@
 	data-active={isActive}
 	data-size={size}
 	class={cn(
-		buttonVariants({ size, variant: isActive ? 'outline' : 'ghost' }),
+		buttonVariants({ size, variant: isActive ? 'active' : 'ghost' }),
 		'cn-pagination-link',
 		className
 	)}

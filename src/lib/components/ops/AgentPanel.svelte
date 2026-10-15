@@ -275,6 +275,13 @@
 		return run.events.filter((event) => event.type === 'tool' || event.type === 'compact');
 	}
 
+	function runStatusClass(status: AgentOpsRun['status']) {
+		if (status === 'running') return 'text-signal';
+		if (status === 'failed') return 'text-destructive';
+		if (status === 'completed') return 'text-muted-foreground';
+		return 'text-faint';
+	}
+
 	function activityLabel(type: string) {
 		return type === 'compact' ? 'compact' : 'tool';
 	}
@@ -290,19 +297,20 @@
 	});
 </script>
 
-<section class="workspace">
-	<Card.Root class="rounded-b-none">
-		<Card.Header>
+<section>
+	<Card.Root class="gap-0 rounded-b-none pb-0">
+		<Card.Header class="border-b pb-4">
 			<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div>
+				<div class="min-w-0">
 					<Card.Title>AI Admin Worker</Card.Title>
-					<Card.Description
+					<Card.Description class="truncate"
 						>{selectedSession?.name ?? 'Select or create a session'}</Card.Description
 					>
 				</div>
 				<Button
 					variant="outline"
 					size="sm"
+					class="self-start sm:self-auto"
 					onclick={() => void loadWorkers()}
 					disabled={loadingWorkers}
 				>
@@ -311,14 +319,16 @@
 			</div>
 		</Card.Header>
 		<Card.Content class="p-0">
-			<div class="grid h-[calc(100vh-11rem)] min-h-[620px] lg:grid-cols-[300px_1fr]">
-				<aside class="flex min-h-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
-					<div class="space-y-2 border-b border-zinc-200 p-4 dark:border-zinc-800">
-						<div class="flex items-center gap-2 text-sm font-medium">
-							<Wifi class="size-4" /> Worker
+			<div
+				class="grid min-h-[620px] grid-rows-[auto_minmax(0,1fr)] lg:h-[calc(100vh-11rem)] lg:grid-cols-[300px_1fr] lg:grid-rows-1"
+			>
+				<aside class="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0">
+					<div class="space-y-3 border-b border-border p-4">
+						<div class="eyebrow flex items-center gap-2">
+							<Wifi class="size-3.5" /> Worker
 						</div>
 						<select
-							class="h-10 w-full rounded-md border border-zinc-200 bg-white px-3 text-sm text-zinc-900 shadow-sm outline-none focus:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+							class="field-select"
 							bind:value={selectedWorkerId}
 							onchange={() => void selectWorker()}
 							disabled={!workers.length || loadingWorkers}
@@ -332,26 +342,33 @@
 							{/if}
 						</select>
 						{#if selectedWorker}
-							<div class="text-xs text-zinc-500">{workerMeta(selectedWorker)}</div>
-							<div
-								class="rounded-md border border-zinc-200 bg-zinc-50 p-2 text-xs text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
-							>
-								<div class="mb-1 flex items-center gap-2 font-medium">
+							<div class="flex items-center gap-2 font-mono text-[11px] text-faint">
+								{#if selectedWorker.connected}
+									<span
+										class="size-1.5 shrink-0 rounded-full bg-signal shadow-[0_0_0_3px_rgb(212_255_63/0.18)]"
+									></span>
+								{/if}
+								<span class="min-w-0 break-all">{workerMeta(selectedWorker)}</span>
+							</div>
+							<div class="rounded-md border border-border bg-card p-3 text-xs">
+								<div class="eyebrow mb-1.5 flex items-center gap-2">
 									<SquareTerminal class="size-3" /> Terminal
 								</div>
-								<div class="break-all text-zinc-500">{terminalMeta(selectedWorker)}</div>
+								<div class="font-mono text-[11px] break-all text-muted-foreground">
+									{terminalMeta(selectedWorker)}
+								</div>
 							</div>
 						{/if}
 						{#if workerError}
-							<div class="text-xs text-red-600">{workerError}</div>
+							<div class="text-xs text-destructive">{workerError}</div>
 						{/if}
 					</div>
 
 					<div class="flex min-h-0 flex-1 flex-col">
 						<div
-							class="flex items-center justify-between gap-2 border-b border-zinc-200 p-3 dark:border-zinc-800"
+							class="flex items-center justify-between gap-2 border-b border-border py-2 pr-2 pl-4"
 						>
-							<div class="text-sm font-medium">Sessions</div>
+							<div class="eyebrow">Sessions</div>
 							<Button
 								variant="ghost"
 								size="icon-sm"
@@ -362,13 +379,13 @@
 								<Plus class="size-4" />
 							</Button>
 						</div>
-						<div class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2">
+						<div class="min-h-0 flex-1 space-y-1 overflow-y-auto p-2 max-lg:max-h-64">
 							{#each sessions as session (session.id)}
 								<div
-									class="grid grid-cols-[1fr_auto] items-center gap-1 rounded-md transition {selectedSessionId ===
+									class="grid grid-cols-[1fr_auto] items-center gap-1 rounded-md transition-colors {selectedSessionId ===
 									session.id
-										? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-950'
-										: 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'}"
+										? 'bg-inverse text-on-inverse'
+										: 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}"
 								>
 									<button
 										type="button"
@@ -377,9 +394,9 @@
 									>
 										<div class="truncate font-medium">{session.name}</div>
 										<div
-											class="mt-1 text-xs {selectedSessionId === session.id
-												? 'text-zinc-300 dark:text-zinc-600'
-												: 'text-zinc-500'}"
+											class="mt-1 font-mono text-[11px] {selectedSessionId === session.id
+												? 'text-on-inverse/60'
+												: 'text-faint'}"
 										>
 											{formatDate(session.updatedAt)}
 										</div>
@@ -389,8 +406,8 @@
 										size="icon-sm"
 										title="Delete session"
 										class={selectedSessionId === session.id
-											? 'mr-1 text-zinc-300 hover:bg-zinc-800 hover:text-white dark:text-zinc-600 dark:hover:bg-zinc-200 dark:hover:text-zinc-950'
-											: 'mr-1 text-zinc-500'}
+											? 'mr-1 text-on-inverse/60 hover:bg-black/10 hover:text-on-inverse active:bg-black/15'
+											: 'mr-1 text-faint'}
 										onclick={(event) => handleDeleteSessionClick(event, session.id)}
 										disabled={!canOperate || deletingSessionId === session.id}
 									>
@@ -399,11 +416,13 @@
 								</div>
 							{/each}
 							{#if selectedWorkerId && !loadingSessions && sessions.length === 0}
-								<div class="px-3 py-6 text-center text-xs text-zinc-500">No sessions yet</div>
+								<div class="px-3 py-6 text-center text-xs text-faint">No sessions yet</div>
 							{/if}
 						</div>
 						{#if sessionError}
-							<div class="border-t border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+							<div
+								class="border-t border-danger-border bg-danger-surface px-4 py-2 text-xs text-destructive"
+							>
 								{sessionError}
 							</div>
 						{/if}
@@ -411,39 +430,42 @@
 				</aside>
 
 				<div class="flex min-h-0 flex-col">
-					<div bind:this={chatViewport} class="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+					<div bind:this={chatViewport} class="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
 						{#if loadingRuns}
-							<div class="text-sm text-zinc-500">Loading...</div>
+							<div class="text-sm text-faint">Loading...</div>
 						{:else if !selectedSessionId}
-							<div class="text-sm text-zinc-500">Create a session to start.</div>
+							<div class="text-sm text-faint">Create a session to start.</div>
 						{:else if runs.length === 0}
-							<div class="text-sm text-zinc-500">No messages yet.</div>
+							<div class="text-sm text-faint">No messages yet.</div>
 						{:else}
 							{#each runs as item (item.id)}
 								<div class="flex justify-end">
 									<div
-										class="max-w-[78%] rounded-lg bg-zinc-900 px-4 py-3 text-sm text-white dark:bg-zinc-100 dark:text-zinc-950"
+										class="max-w-[78%] rounded-lg border border-signal-border bg-outgoing px-4 py-3 text-sm text-foreground"
 									>
 										<div class="whitespace-pre-wrap">{item.goal}</div>
 									</div>
 								</div>
 								<div class="flex justify-start">
 									<div
-										class="max-w-[82%] rounded-lg border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-900 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100"
+										class="max-w-[82%] min-w-0 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-foreground"
 									>
-										<div class="mb-2 text-xs uppercase text-zinc-500">{item.status}</div>
+										<div class="eyebrow mb-2 {runStatusClass(item.status)}">{item.status}</div>
 										<pre
-											class="whitespace-pre-wrap font-sans leading-6 {item.error
-												? 'text-red-700 dark:text-red-300'
+											class="font-sans leading-6 whitespace-pre-wrap {item.error
+												? 'text-destructive'
 												: ''}">{runOutput(item)}</pre>
 										{#if activityEvents(item).length}
-											<div
-												class="mt-3 space-y-1 border-t border-zinc-200 pt-3 text-xs text-zinc-500 dark:border-zinc-800"
-											>
+											<div class="mt-3 space-y-1 border-t border-border pt-3 text-xs text-faint">
 												{#each activityEvents(item) as event (`${item.id}-${event.at}-${event.message}`)}
 													<div class="grid grid-cols-[56px_1fr] gap-2">
-														<span class="uppercase">{activityLabel(event.type)}</span>
-														<span class="truncate">{event.message}</span>
+														<span
+															class="font-mono text-[10.5px] font-bold tracking-[0.08em] uppercase"
+															>{activityLabel(event.type)}</span
+														>
+														<span class="truncate font-mono text-[11px] text-muted-foreground"
+															>{event.message}</span
+														>
 													</div>
 												{/each}
 											</div>
@@ -455,17 +477,17 @@
 					</div>
 
 					<form
-						class="border-t border-zinc-200 p-4 dark:border-zinc-800"
+						class="border-t border-border p-4"
 						onsubmit={(event) => {
 							event.preventDefault();
 							if (canSend) void runAgent();
 						}}
 					>
 						<div
-							class="flex items-end gap-2 rounded-lg border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+							class="flex items-end gap-2 rounded-lg border border-input bg-field p-2 pl-1 transition-colors focus-within:border-signal focus-within:ring-3 focus-within:ring-signal/15 hover:border-field-border-hover focus-within:hover:border-signal"
 						>
 							<Textarea
-								class="max-h-40 min-h-16 resize-none border-0 shadow-none focus-visible:ring-0"
+								class="max-h-40 min-h-16 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
 								bind:value={draft}
 								placeholder="Message the worker"
 								onkeydown={handleComposerKeydown}

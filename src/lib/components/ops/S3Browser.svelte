@@ -70,8 +70,8 @@
 	let writesAllowed = $derived(
 		Boolean(
 			selectedConnection?.config &&
-				'allowWrites' in selectedConnection.config &&
-				selectedConnection.config.allowWrites
+			'allowWrites' in selectedConnection.config &&
+			selectedConnection.config.allowWrites
 		)
 	);
 	let configuredBucket = $derived(configuredBucketName(selectedConnection));
@@ -97,11 +97,11 @@
 	let canSyncRelease = $derived(
 		Boolean(
 			connectionId &&
-				bucket &&
-				canOperate &&
-				writesAllowed &&
-				releaseSyncConfig.enabled &&
-				selectedReleaseTag
+			bucket &&
+			canOperate &&
+			writesAllowed &&
+			releaseSyncConfig.enabled &&
+			selectedReleaseTag
 		)
 	);
 	let canPageBackward = $derived(pageTokens.length > 0);
@@ -307,54 +307,67 @@
 	});
 </script>
 
-<section class="workspace">
+<section>
 	{#if !connectionId || !bucket}
 		<Card.Root>
-			<Card.Content class="text-muted-foreground text-sm">
-				<div class="text-foreground font-medium">S3 file manager unavailable</div>
-				<div class="mt-1">Configure <code>connections.s3.config.defaultBucket</code> in config.json and restart.</div>
+			<Card.Content class="text-sm text-muted-foreground">
+				<div class="font-medium text-foreground">S3 file manager unavailable</div>
+				<div class="mt-1">
+					Configure <code class="font-mono text-[13px] text-foreground"
+						>connections.s3.config.defaultBucket</code
+					> in config.json and restart.
+				</div>
 			</Card.Content>
 		</Card.Root>
 	{:else}
 		<Card.Root>
 			<Card.Header>
-				<div class="flex items-center justify-between gap-3">
-					<div>
+				<div class="flex flex-wrap items-center justify-between gap-3">
+					<div class="min-w-0">
 						<Card.Title>Files</Card.Title>
-						<Card.Description>{bucket} / {prefix || '(root)'}</Card.Description>
+						<Card.Description class="font-mono text-[12px] break-all"
+							>{bucket} / {prefix || '(root)'}</Card.Description
+						>
 					</div>
-					<div class="flex items-center gap-2">
+					<div class="flex flex-wrap items-center gap-2">
 						<Select.Root type="single" bind:value={maxKeysValue} onValueChange={updateMaxKeys}>
-							<Select.Trigger aria-label="S3 page size" class="w-[112px]">{maxKeys} keys</Select.Trigger>
+							<Select.Trigger aria-label="S3 page size" size="sm" class="w-[120px]"
+								>{maxKeys} keys</Select.Trigger
+							>
 							<Select.Content>
 								{#each [100, 250, 500, 1000] as size (size)}
 									<Select.Item value={String(size)}>{size} keys</Select.Item>
 								{/each}
 							</Select.Content>
 						</Select.Root>
-						<Button variant="outline" size="sm" onclick={openParentPrefix} disabled={!prefix}><ArrowUp class="size-4" /> Up</Button>
-						<Button variant="outline" size="sm" onclick={() => loadObjects(false)}><RefreshCw class="size-4" /> Reload</Button>
+						<Button variant="outline" size="sm" onclick={openParentPrefix} disabled={!prefix}
+							><ArrowUp class="size-4" /> Up</Button
+						>
+						<Button variant="outline" size="sm" onclick={() => loadObjects(false)}
+							><RefreshCw class="size-4" /> Reload</Button
+						>
 					</div>
 				</div>
 			</Card.Header>
 			<Card.Content>
 				{#if releaseSyncConfig.enabled}
-					<div class="mb-4 border-b pb-4">
+					<div class="mb-4 rounded-lg border border-border bg-card p-4">
 						<div class="flex flex-wrap items-end justify-between gap-3">
 							<div class="min-w-0">
-								<div class="text-sm font-medium">Release sync</div>
-								<div class="text-muted-foreground mt-1 truncate text-xs">
+								<div class="eyebrow">Release sync</div>
+								<div class="mt-2 truncate font-mono text-[12px] text-muted-foreground">
 									{releaseSyncConfig.repository} -> {bucket}/{releaseSyncConfig.targetPrefix}
 								</div>
 								{#if releaseSyncConfig.assetPrefix}
-									<div class="text-muted-foreground mt-1 truncate text-xs">
-										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.apk / appcast.xml
+									<div class="mt-1 truncate font-mono text-[11px] text-faint">
+										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe
+										/ {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.apk / appcast.xml
 									</div>
 								{/if}
 							</div>
 							<div class="flex min-w-0 flex-wrap items-center gap-2">
 								<Select.Root type="single" bind:value={selectedReleaseTag}>
-									<Select.Trigger aria-label="GitHub release version" class="w-[220px]">
+									<Select.Trigger aria-label="GitHub release version" size="sm" class="w-[220px]">
 										{selectedReleaseTag || 'No releases'}
 									</Select.Trigger>
 									<Select.Content>
@@ -365,35 +378,53 @@
 										{/each}
 									</Select.Content>
 								</Select.Root>
-								<Button variant="outline" size="sm" onclick={loadReleaseSync}><RefreshCw class="size-4" /> Versions</Button>
-								<Button size="sm" onclick={syncRelease} disabled={!canSyncRelease}><Upload class="size-4" /> Sync</Button>
+								<Button variant="outline" size="sm" onclick={loadReleaseSync}
+									><RefreshCw class="size-4" /> Versions</Button
+								>
+								<Button size="sm" onclick={syncRelease} disabled={!canSyncRelease}
+									><Upload class="size-4" /> Sync</Button
+								>
 							</div>
 						</div>
 						{#if selectedRelease?.publishedAt || releaseSyncSummary}
-							<div class="text-muted-foreground mt-2 text-xs">
+							<div class="mt-3 font-mono text-[11px] text-faint">
 								{#if selectedRelease?.publishedAt}{selectedRelease.publishedAt}{/if}
-								{#if releaseSyncSummary}{selectedRelease?.publishedAt ? ' · ' : ''}{releaseSyncSummary}{/if}
+								{#if releaseSyncSummary}{selectedRelease?.publishedAt
+										? ' · '
+										: ''}{releaseSyncSummary}{/if}
 							</div>
 						{/if}
 					</div>
 				{/if}
-				<div class="mb-3 grid grid-cols-[1fr_1fr_auto] gap-2">
+				<div class="mb-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
 					<Input bind:value={uploadKey} placeholder={prefix ? `${prefix}file.ext` : 'file key'} />
 					<Input type="file" onchange={onUploadFileChange} />
-					<Button onclick={uploadObject} disabled={!canUpload}><Upload class="size-4" /> Upload</Button>
+					<Button onclick={uploadObject} disabled={!canUpload}
+						><Upload class="size-4" /> Upload</Button
+					>
 				</div>
-				<div class="text-muted-foreground mb-3 flex items-center justify-between gap-2 text-xs">
+				<div
+					class="mb-3 flex items-center justify-between gap-2 px-1 font-mono text-[11px] text-faint"
+				>
 					<div class="truncate">target: {resolvedUploadKey || '-'}</div>
-					<label class="flex items-center gap-2">
+					<label class="flex items-center gap-2 text-muted-foreground">
 						<Checkbox bind:checked={allowOverwrite} disabled={!uploadOverwrites} />
 						overwrite
 					</label>
 				</div>
 				{#if uploadOverwrites && !allowOverwrite}
-					<div class="text-muted-foreground mb-3 rounded-lg border px-2 py-1 text-xs">This file already exists. Enable overwrite to replace it.</div>
+					<div
+						class="mb-3 rounded-md border border-warning/32 bg-warning/10 px-3 py-2 text-xs text-warning"
+					>
+						This file already exists. Enable overwrite to replace it.
+					</div>
 				{/if}
 				{#if uploadOverwrites && allowOverwrite}
-					<Input class="mb-3" bind:value={overwriteConfirmKey} placeholder="type exact key to overwrite" />
+					<Input
+						class="mb-3"
+						bind:value={overwriteConfirmKey}
+						placeholder="type exact key to overwrite"
+					/>
 				{/if}
 
 				<Table.Root>
@@ -408,50 +439,109 @@
 					<Table.Body>
 						{#each prefixes as item (item)}
 							<Table.Row class="cursor-pointer" onclick={() => openPrefix(item)}>
-								<Table.Cell class="font-medium"><div class="flex items-center gap-2"><Folder class="size-4" />{shortName(item)}/</div></Table.Cell>
+								<Table.Cell class="font-medium"
+									><div class="flex items-center gap-2">
+										<Folder class="size-4 text-muted-foreground" />{shortName(item)}/
+									</div></Table.Cell
+								>
 								<Table.Cell></Table.Cell>
 								<Table.Cell></Table.Cell>
-								<Table.Cell class="text-right"><Button variant="ghost" size="icon-xs" onclick={() => openPrefix(item)}><ChevronRight class="size-3" /></Button></Table.Cell>
+								<Table.Cell class="text-right"
+									><Button variant="ghost" size="icon-xs" onclick={() => openPrefix(item)}
+										><ChevronRight class="size-3" /></Button
+									></Table.Cell
+								>
 							</Table.Row>
 						{/each}
 						{#each objects as object (object.key)}
-							<Table.Row class={selectedKey === object.key ? 'bg-muted cursor-pointer' : 'cursor-pointer'} onclick={() => selectObject(object)}>
-								<Table.Cell><div class="flex items-center gap-2"><FileIcon class="text-muted-foreground size-4" /><span class="break-all">{shortName(object.key)}</span></div></Table.Cell>
-								<Table.Cell>{formatBytes(object.size)}</Table.Cell>
-								<Table.Cell>{object.lastModified ?? ''}</Table.Cell>
-								<Table.Cell class="text-right">
-									<Button variant="ghost" size="icon-xs" onclick={() => downloadObject(object.key)}><Download class="size-3" /></Button>
-									<Button variant="destructive" size="icon-xs" onclick={() => { deleteCandidate = object; deleteConfirmKey = ''; }} disabled={!writesAllowed || !canOperate}><Trash2 class="size-3" /></Button>
+							<Table.Row
+								class={selectedKey === object.key
+									? 'cursor-pointer bg-surface-hover hover:bg-surface-hover'
+									: 'cursor-pointer'}
+								onclick={() => selectObject(object)}
+							>
+								<Table.Cell
+									><div class="flex items-center gap-2">
+										<FileIcon class="size-4 text-faint" /><span class="break-all"
+											>{shortName(object.key)}</span
+										>
+									</div></Table.Cell
+								>
+								<Table.Cell class="font-mono text-[12px] text-muted-foreground"
+									>{formatBytes(object.size)}</Table.Cell
+								>
+								<Table.Cell class="font-mono text-[12px] text-muted-foreground"
+									>{object.lastModified ?? ''}</Table.Cell
+								>
+								<Table.Cell class="space-x-1 text-right">
+									<Button variant="ghost" size="icon-xs" onclick={() => downloadObject(object.key)}
+										><Download class="size-3" /></Button
+									>
+									<Button
+										variant="destructive"
+										size="icon-xs"
+										onclick={() => {
+											deleteCandidate = object;
+											deleteConfirmKey = '';
+										}}
+										disabled={!writesAllowed || !canOperate}><Trash2 class="size-3" /></Button
+									>
 								</Table.Cell>
 							</Table.Row>
 						{/each}
 					</Table.Body>
 				</Table.Root>
 				{#if prefixes.length === 0 && objects.length === 0}
-					<div class="text-muted-foreground mt-4 rounded-lg border border-dashed px-3 py-6 text-center text-sm">No files found.</div>
+					<div
+						class="mt-4 rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
+					>
+						No files found.
+					</div>
 				{/if}
-				<div class="mt-3 flex items-center justify-between gap-2">
-					<div class="text-muted-foreground min-w-0 text-xs">
+				<div class="mt-3 flex flex-wrap items-center justify-between gap-2">
+					<div class="min-w-0 font-mono text-[11px] text-faint">
 						{#if selectedObject}
-							<span class="break-all">Selected: {selectedObject.key} · {formatBytes(selectedObject.size)}</span>
+							<span class="break-all"
+								>Selected: {selectedObject.key} · {formatBytes(selectedObject.size)}</span
+							>
 						{/if}
 					</div>
 					<div class="flex gap-2">
-						<Button variant="outline" size="sm" onclick={previousPage} disabled={!canPageBackward}><ChevronLeft class="size-4" /> Prev</Button>
-						<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>Next <ChevronRight class="size-4" /></Button>
+						<Button variant="outline" size="sm" onclick={previousPage} disabled={!canPageBackward}
+							><ChevronLeft class="size-4" /> Prev</Button
+						>
+						<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}
+							>Next <ChevronRight class="size-4" /></Button
+						>
 					</div>
 				</div>
 
 				{#if deleteCandidate}
-					<div class="text-destructive mt-4 rounded-lg border p-3 text-xs">
-						<div class="font-semibold">Confirm delete</div>
-						<div class="mt-1 break-all">{deleteCandidate.key}</div>
-						<Input class="mt-2" bind:value={deleteConfirmKey} placeholder="type exact key to confirm" />
-						<div class="mt-2 flex gap-2">
-							<Button variant="destructive" onclick={deleteObject} disabled={!writesAllowed || !canOperate || deleteConfirmKey !== deleteCandidate.key}>
+					<div
+						class="mt-4 rounded-lg border border-danger-border bg-danger-surface p-4 text-xs text-destructive"
+					>
+						<div class="eyebrow text-destructive">Confirm delete</div>
+						<div class="mt-2 font-mono break-all">{deleteCandidate.key}</div>
+						<Input
+							class="mt-3"
+							bind:value={deleteConfirmKey}
+							placeholder="type exact key to confirm"
+						/>
+						<div class="mt-3 flex gap-2">
+							<Button
+								variant="destructive"
+								onclick={deleteObject}
+								disabled={!writesAllowed || !canOperate || deleteConfirmKey !== deleteCandidate.key}
+							>
 								<Trash2 class="size-4" /> Delete file
 							</Button>
-							<Button variant="outline" onclick={() => { deleteCandidate = undefined; deleteConfirmKey = ''; }}>
+							<Button
+								variant="outline"
+								onclick={() => {
+									deleteCandidate = undefined;
+									deleteConfirmKey = '';
+								}}
+							>
 								Cancel
 							</Button>
 						</div>

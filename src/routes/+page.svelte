@@ -3,6 +3,9 @@
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { ApiClient, ApiClientError } from '$lib/api/client';
+	import brandMark from '$lib/assets/gang_chat.svg';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import AgentPanel from '$lib/components/ops/AgentPanel.svelte';
 	import ExpensesPanel from '$lib/components/ops/ExpensesPanel.svelte';
 	import MysqlWorkbench from '$lib/components/ops/MysqlWorkbench.svelte';
@@ -30,6 +33,7 @@
 	let s3Connections = $derived(connections.filter((item) => item.type === 's3'));
 	let currentRole = $derived<AuthRole | undefined>(currentUser?.role);
 	let isAuthenticated = $derived(Boolean(token.trim() && currentUser));
+	let apiOnline = $derived(health.startsWith('ok'));
 
 	const navItems: Array<{ id: View; label: string; icon: typeof Database }> = [
 		{ id: 'mysql', label: 'MySQL', icon: Database },
@@ -148,28 +152,41 @@
 	<title>Gang Chat Ops</title>
 </svelte:head>
 
+{#snippet sectionHeading(index: string, title: string)}
+	<div class="section-heading">
+		<span class="section-heading__index" aria-hidden="true">{index}</span>
+		<h2>{title}</h2>
+	</div>
+{/snippet}
+
 {#if !isAuthenticated}
-	<main class="ops-page-bg flex min-h-screen items-center justify-center px-4 text-foreground">
+	<main class="flex min-h-screen items-center justify-center px-4 py-10 text-foreground">
 		<section class="login-card">
-			<div class="mb-6">
-				<div class="text-[40px] font-semibold leading-tight tracking-[-0.02em]">Gang Chat Ops</div>
-				<div class="mt-2 text-[21px] leading-snug text-[#333]">Sign in to the control plane.</div>
-				<div class="mt-5 text-sm text-[#7a7a7a]">API {health}</div>
+			<div class="mb-7">
+				<img src={brandMark} alt="" class="mb-6 size-12" />
+				<h1 class="font-display text-[30px] leading-[1.15] font-bold tracking-[-0.02em]">
+					Gang Chat Ops
+				</h1>
+				<p class="mt-2 text-[15px] text-muted-foreground">Sign in to the control plane.</p>
+				<div class="mt-5">
+					<span class="signal-tag {apiOnline ? 'signal-tag--live' : ''}">
+						<span class="signal-tag__dot"></span>API {health}
+					</span>
+				</div>
 			</div>
 
-			<label class="block text-sm font-medium text-zinc-700" for="ops-username">Username</label>
-			<input
+			<label class="eyebrow block" for="ops-username">Username</label>
+			<Input
 				id="ops-username"
-				class="mt-1 h-10 w-full rounded-md border-zinc-300 text-sm"
+				class="mt-2 h-11"
 				bind:value={loginUsername}
 				autocomplete="username"
 			/>
 
-			<label class="mt-4 block text-sm font-medium text-zinc-700" for="ops-password">Password</label
-			>
-			<input
+			<label class="eyebrow mt-5 block" for="ops-password">Password</label>
+			<Input
 				id="ops-password"
-				class="mt-1 h-10 w-full rounded-md border-zinc-300 text-sm"
+				class="mt-2 h-11"
 				type="password"
 				bind:value={loginPassword}
 				autocomplete="current-password"
@@ -178,17 +195,17 @@
 				}}
 			/>
 
-			<button
-				class="command-button mt-5 h-10 w-full"
+			<Button
+				class="mt-7 h-11 w-full"
 				onclick={login}
 				disabled={!loginUsername || !loginPassword || busy}
 			>
 				Login
-			</button>
+			</Button>
 
 			{#if message}
 				<div
-					class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+					class="mt-4 rounded-md border border-warning/32 bg-warning/10 px-4 py-2.5 text-sm text-warning"
 				>
 					{message}
 				</div>
@@ -196,28 +213,51 @@
 		</section>
 	</main>
 {:else}
-	<main
-		class="ops-page-bg min-h-screen space-y-8 px-4 py-4 pr-24 pb-16 text-foreground sm:px-6 sm:pr-28"
-	>
+	<main class="min-h-screen space-y-8 px-4 pt-4 pb-28 text-foreground sm:pr-28 sm:pb-16 sm:pl-6">
+		<header class="ops-header">
+			<div class="flex min-w-0 items-center gap-3">
+				<img src={brandMark} alt="" class="size-9 shrink-0" />
+				<span class="truncate font-display text-xl leading-none font-bold tracking-[-0.01em]">
+					Gang Chat Ops
+				</span>
+			</div>
+			<div class="flex min-w-0 flex-wrap items-center gap-2">
+				<span class="signal-tag {apiOnline ? 'signal-tag--live' : ''}">
+					<span class="signal-tag__dot"></span>API {health}
+				</span>
+				{#if currentUser}
+					<span class="signal-tag min-w-0">
+						<span class="truncate">{actor} · {currentUser.role}</span>
+					</span>
+				{/if}
+			</div>
+		</header>
+
 		{#if message}
-			<div class="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+			<div
+				class="rounded-md border border-warning/32 bg-warning/10 px-4 py-2.5 text-sm text-warning"
+			>
 				{message}
 			</div>
 		{/if}
 
 		<section id="mysql" class="scroll-mt-6">
+			{@render sectionHeading('01', 'MySQL')}
 			<MysqlWorkbench {api} {mysqlConnections} {run} />
 		</section>
 
 		<section id="s3" class="scroll-mt-6">
+			{@render sectionHeading('02', 'S3 files')}
 			<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
 		</section>
 
 		<section id="agent" class="scroll-mt-6">
+			{@render sectionHeading('03', 'Agent')}
 			<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
 		</section>
 
 		<section id="expenses" class="scroll-mt-6">
+			{@render sectionHeading('04', 'Cost')}
 			<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
 		</section>
 

@@ -150,6 +150,19 @@ npm run test:api     # backend tests
 npm run build        # frontend build + API bundle
 ```
 
+## Design
+
+The UI uses the Gang Chat client's Signal design (gang-chat-client `docs/ui-design-system.md`,
+`lib/src/ui/tokens.dart`), the same as the homepage. It is dark only: a near-black dotted canvas,
+layered dark panels, and one lime signal colour (`#D4FF3F`) reserved for what is live or can be
+pressed. Selection is an inverse white pill. The tokens live in `src/routes/layout.css` and are
+mapped onto the shadcn-svelte roles, so the components under `src/lib/components/ui` pick them up.
+
+Space Grotesk, JetBrains Mono and Doto are self-hosted as Latin-subset WOFF files in
+`src/lib/assets/fonts` (OFL, licences alongside); Chinese text falls back to the system font. Do
+not switch them to Google Fonts, which is unreliable in mainland China. The brand mark
+`src/lib/assets/gang_chat.svg` (also `static/favicon.svg`) is the client's.
+
 ## Security Notes
 
 - Do not expose the API without TLS.

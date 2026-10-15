@@ -47,18 +47,22 @@
 	onMount(async () => {
 		const [{ Terminal }, { FitAddon }] = await Promise.all([
 			import('@xterm/xterm'),
-			import('@xterm/addon-fit')
+			import('@xterm/addon-fit'),
+			// xterm measures its cells once, so wait for the self-hosted mono face.
+			document.fonts?.load('500 12px "JetBrains Mono"').catch(() => undefined)
 		]);
 		const term = new Terminal({
 			cursorBlink: true,
-			fontFamily: 'JetBrains Mono, Consolas, monospace',
+			fontFamily: '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
 			fontSize: 12,
 			scrollback: 10_000,
+			// Signal: a black recessed screen with the lime signal cursor.
 			theme: {
-				background: '#080b0f',
-				foreground: '#d7dde7',
-				cursor: '#48cae4',
-				selectionBackground: '#264653'
+				background: '#000000',
+				foreground: '#f4f4f1',
+				cursor: '#d4ff3f',
+				cursorAccent: '#0a0b05',
+				selectionBackground: 'rgba(204, 244, 58, 0.3)'
 			}
 		}) as TerminalLike & {
 			loadAddon: (addon: unknown) => void;
@@ -267,61 +271,49 @@
 </script>
 
 <section
-	class="flex min-h-0 flex-col overflow-hidden border border-zinc-800 bg-[#080b0f] {attachedTop
-		? 'rounded-b-xl'
-		: 'rounded-md'}"
+	class="flex min-h-0 flex-col overflow-hidden border border-border bg-surface-pressed {attachedTop
+		? 'h-full rounded-b-xl'
+		: 'rounded-lg'}"
 >
-	<header class="flex h-9 items-center justify-between border-b border-zinc-800 bg-zinc-950 px-3">
-		<div class="truncate text-xs font-medium text-zinc-200">{title}</div>
-		<div class="flex items-center gap-2">
+	<header
+		class="flex h-10 items-center justify-between gap-3 border-b border-border bg-panel pr-2 pl-5"
+	>
+		<div class="eyebrow truncate text-muted-foreground">{title}</div>
+		<div class="flex items-center gap-1">
 			<span
-				class="rounded px-2 py-0.5 text-[11px] uppercase tracking-wide {status === 'connected'
-					? 'bg-emerald-950 text-emerald-300'
+				class="signal-tag mr-1 h-5 px-2 text-[10.5px] {status === 'connected'
+					? 'signal-tag--live'
 					: status === 'error'
-						? 'bg-red-950 text-red-300'
+						? 'signal-tag--danger'
 						: status === 'connecting'
-							? 'bg-amber-950 text-amber-300'
-							: 'bg-zinc-900 text-zinc-400'}"
+							? 'signal-tag--amber'
+							: ''}"
 			>
 				{statusText}
 			</span>
 			<Button
-				variant="outline"
-				size="icon-xs"
-				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
+				variant="ghost"
+				size="icon-sm"
 				title="Connect"
 				onclick={connect}
 				disabled={!workerId || !canOperate || connecting}
 			>
-				<Plug class="size-3" />
+				<Plug class="size-3.5" />
 			</Button>
 			<Button
-				variant="outline"
-				size="icon-xs"
-				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
+				variant="ghost"
+				size="icon-sm"
 				title="Reconnect"
 				onclick={reconnect}
 				disabled={!workerId || !canOperate}
 			>
-				<RotateCw class="size-3" />
+				<RotateCw class="size-3.5" />
 			</Button>
-			<Button
-				variant="outline"
-				size="icon-xs"
-				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
-				title="Disconnect"
-				onclick={disconnect}
-			>
-				<PlugZap class="size-3" />
+			<Button variant="ghost" size="icon-sm" title="Disconnect" onclick={disconnect}>
+				<PlugZap class="size-3.5" />
 			</Button>
-			<Button
-				variant="outline"
-				size="icon-xs"
-				class="h-6 w-6 border-zinc-700 bg-zinc-950 text-zinc-200 hover:bg-zinc-800 hover:text-zinc-100"
-				title="Clear"
-				onclick={clearTerminal}
-			>
-				<Eraser class="size-3" />
+			<Button variant="ghost" size="icon-sm" title="Clear" onclick={clearTerminal}>
+				<Eraser class="size-3.5" />
 			</Button>
 		</div>
 	</header>

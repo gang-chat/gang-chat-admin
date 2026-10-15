@@ -35,8 +35,8 @@
 	let mutationsAllowed = $derived(
 		Boolean(
 			selectedConnection?.config &&
-				'allowMutations' in selectedConnection.config &&
-				selectedConnection.config.allowMutations
+			'allowMutations' in selectedConnection.config &&
+			selectedConnection.config.allowMutations
 		)
 	);
 	let displayFields = $derived(
@@ -100,105 +100,123 @@
 	});
 </script>
 
-<section class="workspace space-y-4">
+<section class="space-y-4">
 	{#if !connectionId}
 		<Card.Root>
-			<Card.Content class="text-muted-foreground text-sm">
-				<div class="text-foreground font-medium">No MySQL connection configured</div>
+			<Card.Content class="text-sm text-muted-foreground">
+				<div class="font-medium text-foreground">No MySQL connection configured</div>
 				<div class="mt-1">
-					This is a preview shell. Add <code>connections.mysql</code> in config.json and restart to enable data operations.
+					This is a preview shell. Add <code class="font-mono text-[13px] text-foreground"
+						>connections.mysql</code
+					> in config.json and restart to enable data operations.
 				</div>
 			</Card.Content>
 		</Card.Root>
 	{:else}
-		<div class="grid min-h-[640px] grid-cols-[260px_1fr] gap-4">
-		<Card.Root>
-			<Card.Header>
-				<div class="flex items-start justify-between gap-2">
-					<div>
-						<Card.Title>Tables</Card.Title>
-						<Card.Description>{selectedConnection?.name ?? 'MySQL not configured'}</Card.Description>
+		<div class="grid gap-4 lg:min-h-[640px] lg:grid-cols-[260px_1fr]">
+			<Card.Root>
+				<Card.Header>
+					<div class="flex items-start justify-between gap-2">
+						<div class="min-w-0">
+							<Card.Title>Tables</Card.Title>
+							<Card.Description class="truncate"
+								>{selectedConnection?.name ?? 'MySQL not configured'}</Card.Description
+							>
+						</div>
+						{#if selectedConnection}
+							<Badge variant={mutationsAllowed ? 'warning' : 'outline'}>
+								{mutationsAllowed ? 'writes' : 'read only'}
+							</Badge>
+						{/if}
 					</div>
-					{#if selectedConnection}
-						<Badge variant={mutationsAllowed ? 'secondary' : 'outline'}>
-							{mutationsAllowed ? 'writes' : 'read only'}
-						</Badge>
-					{/if}
-				</div>
-			</Card.Header>
-			<Card.Content class="space-y-1 overflow-auto">
-				{#each tables as table (table.name)}
-					<Button
-						variant={tableName === table.name ? 'secondary' : 'ghost'}
-						class="w-full justify-between"
-						onclick={() => selectTable(table.name)}
-					>
-						<span class="truncate">{table.name}</span>
-						<span class="text-muted-foreground text-xs">{table.rows ?? 0}</span>
-					</Button>
-				{/each}
-			</Card.Content>
-		</Card.Root>
+				</Card.Header>
+				<Card.Content class="space-y-1 overflow-auto px-3 max-lg:max-h-80">
+					{#each tables as table (table.name)}
+						<Button
+							variant={tableName === table.name ? 'active' : 'ghost'}
+							class="w-full justify-between rounded-md px-3"
+							onclick={() => selectTable(table.name)}
+						>
+							<span class="truncate">{table.name}</span>
+							<span
+								class="font-mono text-[11px] {tableName === table.name
+									? 'text-on-inverse/60'
+									: 'text-faint'}">{table.rows ?? 0}</span
+							>
+						</Button>
+					{/each}
+				</Card.Content>
+			</Card.Root>
 
-		<Card.Root class="min-w-0">
-			<Card.Header>
-				<div class="flex items-center justify-between gap-3">
-					<div>
-						<Card.Title>Rows</Card.Title>
-						<Card.Description>
-							{tableName || 'No table selected'} / offset {rowOffset}
-							{#if selectedTable?.rows !== undefined}
-								/ approx {selectedTable.rows} rows
-							{/if}
-						</Card.Description>
+			<Card.Root class="min-w-0">
+				<Card.Header>
+					<div class="flex flex-wrap items-center justify-between gap-3">
+						<div class="min-w-0">
+							<Card.Title>Rows</Card.Title>
+							<Card.Description class="font-mono text-[12px]">
+								{tableName || 'No table selected'} / offset {rowOffset}
+								{#if selectedTable?.rows !== undefined}
+									/ approx {selectedTable.rows} rows
+								{/if}
+							</Card.Description>
+						</div>
+						<div class="flex flex-wrap items-center gap-2">
+							<Select.Root type="single" bind:value={rowLimitValue} onValueChange={updateRowLimit}>
+								<Select.Trigger aria-label="Row page size" size="sm" class="w-[120px]"
+									>{rowLimit} rows</Select.Trigger
+								>
+								<Select.Content>
+									{#each [50, 100, 250, 500] as size (size)}
+										<Select.Item value={String(size)}>{size} rows</Select.Item>
+									{/each}
+								</Select.Content>
+							</Select.Root>
+							<Button variant="outline" size="sm" onclick={() => loadTable()}>
+								<RefreshCw class="size-4" /> Reload
+							</Button>
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={previousPage}
+								disabled={!canPageBackward}
+							>
+								<ChevronLeft class="size-4" /> Prev
+							</Button>
+							<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>
+								Next <ChevronRight class="size-4" />
+							</Button>
+						</div>
 					</div>
-					<div class="flex items-center gap-2">
-						<Select.Root type="single" bind:value={rowLimitValue} onValueChange={updateRowLimit}>
-							<Select.Trigger aria-label="Row page size" class="w-[112px]">{rowLimit} rows</Select.Trigger>
-							<Select.Content>
-								{#each [50, 100, 250, 500] as size (size)}
-									<Select.Item value={String(size)}>{size} rows</Select.Item>
-								{/each}
-							</Select.Content>
-						</Select.Root>
-						<Button variant="outline" size="sm" onclick={() => loadTable()}>
-							<RefreshCw class="size-4" /> Reload
-						</Button>
-						<Button variant="outline" size="sm" onclick={previousPage} disabled={!canPageBackward}>
-							<ChevronLeft class="size-4" /> Prev
-						</Button>
-						<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>
-							Next <ChevronRight class="size-4" />
-						</Button>
-					</div>
-				</div>
-			</Card.Header>
-			<Card.Content class="min-w-0 overflow-auto">
-				<Table.Root>
-					<Table.Header>
-						<Table.Row>
-							{#each displayFields as field (field)}
-								<Table.Head>{field}</Table.Head>
-							{/each}
-						</Table.Row>
-					</Table.Header>
-					<Table.Body>
-						{#each rows as row, rowIndex (rowIndex)}
+				</Card.Header>
+				<Card.Content class="min-w-0 overflow-auto">
+					<Table.Root>
+						<Table.Header>
 							<Table.Row>
 								{#each displayFields as field (field)}
-									<Table.Cell>{String(row[field] ?? '')}</Table.Cell>
+									<!-- Column names keep their case. -->
+									<Table.Head class="tracking-[0.04em] normal-case">{field}</Table.Head>
 								{/each}
 							</Table.Row>
-						{/each}
-					</Table.Body>
-				</Table.Root>
-				{#if rows.length === 0}
-					<div class="text-muted-foreground mt-4 rounded-lg border border-dashed px-3 py-6 text-center text-sm">
-						No rows loaded for this table.
-					</div>
-				{/if}
-			</Card.Content>
-		</Card.Root>
+						</Table.Header>
+						<Table.Body>
+							{#each rows as row, rowIndex (rowIndex)}
+								<Table.Row>
+									{#each displayFields as field (field)}
+										<Table.Cell>{String(row[field] ?? '')}</Table.Cell>
+									{/each}
+								</Table.Row>
+							{/each}
+						</Table.Body>
+					</Table.Root>
+					{#if rows.length === 0}
+						<div
+							class="mt-4 rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
+						>
+							No rows loaded for this table.
+						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 		</div>
 	{/if}
 </section>
