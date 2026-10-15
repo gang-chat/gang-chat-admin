@@ -447,8 +447,14 @@
 								<Table.Cell></Table.Cell>
 								<Table.Cell></Table.Cell>
 								<Table.Cell class="text-right"
-									><Button variant="ghost" size="icon-xs" onclick={() => openPrefix(item)}
-										><ChevronRight class="size-3" /></Button
+									><Button
+										variant="ghost"
+										size="icon-xs"
+										onclick={(event) => {
+											// The row opens the prefix too; don't load it twice.
+											event.stopPropagation();
+											openPrefix(item);
+										}}><ChevronRight class="size-3" /></Button
 									></Table.Cell
 								>
 							</Table.Row>
@@ -480,7 +486,10 @@
 									<Button
 										variant="destructive"
 										size="icon-xs"
-										onclick={() => {
+										onclick={(event) => {
+											// The row's selectObject() would clear the confirm box again.
+											event.stopPropagation();
+											selectObject(object);
 											deleteCandidate = object;
 											deleteConfirmKey = '';
 										}}
