@@ -2,28 +2,22 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
-import websocket from '@fastify/websocket';
-import { EventEmitter } from 'node:events';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import type { ServerConfig } from './config/config';
 import { HttpError, registerErrors, requireAuth } from './core/http';
 import { actorFromRequest, enterRequestContext } from './core/request-context';
-import { AgentService } from './modules/agent/agent.service';
-import { registerAiAdminWorkerSocket } from './modules/agent/ai-admin-worker-hub';
-import { registerAgentRoutes } from './modules/agent/agent.routes';
+import { AccountsService } from './modules/accounts/accounts.service';
+import { registerAccountRoutes } from './modules/accounts/accounts.routes';
 import { AuditRepository } from './modules/audit/audit.repository';
 import { registerAuthRoutes } from './modules/auth/auth.routes';
 import { AuthService } from './modules/auth/auth.service';
 import { ConnectionsRepository } from './modules/connections/connections.repository';
 import { registerConnectionRoutes } from './modules/connections/connections.routes';
-import { ExpensesRepository } from './modules/expenses/expenses.repository';
-import { registerExpenseRoutes } from './modules/expenses/expenses.routes';
 import { MysqlService } from './modules/mysql/mysql.service';
 import { registerMysqlRoutes } from './modules/mysql/mysql.routes';
 import { S3Service } from './modules/s3/s3.service';
 import { registerS3Routes } from './modules/s3/s3.routes';
-import { registerSshRoutes } from './modules/ssh/ssh.routes';
 import { registerWebRoutes } from './web/web.routes';
 
 export async function buildApp(env: ServerConfig) {
@@ -56,16 +50,6 @@ export async function buildApp(env: ServerConfig) {
 				? `${request.ip}:${request.headers.authorization.slice(0, 24)}`
 				: request.ip
 	});
-	const backendWebsocketUpgrades = new EventEmitter();
-	await app.register(websocket, {
-		options: {
-			server: backendWebsocketUpgrades as never
-		}
-	});
-	app.server.on('upgrade', (request, socket, head) => {
-		if (!logicalUrl(env, request.url ?? '').startsWith('/ws/')) return;
-		backendWebsocketUpgrades.emit('upgrade', request, socket, head);
-	});
 	await app.register(multipart, {
 		limits: {
 			fileSize: env.uploadLimitBytes,
@@ -90,25 +74,17 @@ export async function buildApp(env: ServerConfig) {
 	await auth.initialize();
 	const mysql = new MysqlService(connections);
 	const s3 = new S3Service(connections, env.releaseSync);
-	const expenses = new ExpensesRepository(env.dataDir);
-	const agent = new AgentService(env.dataDir);
+	const accounts = new AccountsService(connections, mysql);
 
 	app.addHook('preHandler', async (request) => {
 		const url = logicalUrl(env, request.url);
 		enterRequestContext(actorFromRequest(request));
-		if (
-			url.startsWith('/api/health') ||
-			url.startsWith('/ws/ssh') ||
-			url.startsWith('/ws/ai-admin-worker')
-		) {
-			return;
-		}
+		if (url.startsWith('/api/health')) return;
 		if (!url.startsWith('/api/')) return;
 		assertAllowedOrigin(env, request.headers.origin);
 		if (url.startsWith('/api/auth/login')) {
 			return;
 		}
-		if (url.startsWith('/api/agent/worker/')) return;
 		const identity = await requireAuth(env, request, (token) => auth.validateToken(token));
 		request.opsIdentity = identity;
 		enterRequestContext(actorFromRequest(request, identity.actor), identity);
@@ -126,10 +102,7 @@ export async function buildApp(env: ServerConfig) {
 		await registerConnectionRoutes(scope, { connections, mysql, s3, audit });
 		await registerMysqlRoutes(scope, { mysql, audit });
 		await registerS3Routes(scope, { s3, audit });
-		await registerExpenseRoutes(scope, { expenses, audit });
-		const aiAdminWorkerHub = registerAiAdminWorkerSocket(scope, { env, agent });
-		await registerAgentRoutes(scope, { env, agent, audit, aiAdminWorkerHub });
-		await registerSshRoutes(scope, { env, connections, audit });
+		await registerAccountRoutes(scope, { accounts, audit });
 	};
 	if (env.basePath) {
 		await app.register(registerBackendRoutes, { prefix: env.basePath });

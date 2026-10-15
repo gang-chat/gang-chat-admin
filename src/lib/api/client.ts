@@ -1,18 +1,17 @@
 import type {
 	ApiEnvelope,
-	AgentJob,
-	AgentOpsRun,
-	AgentOpsSession,
-	AgentWorkerStatus,
 	AuthLoginResult,
 	AuthRole,
 	AuthUser,
 	ConnectionInput,
 	ConnectionPreset,
 	ConnectionType,
-	ExpenseEntry,
-	ExpenseInput,
-	ExpenseSummary,
+	GangAccountCreateInput,
+	GangAccountDetail,
+	GangAccountList,
+	GangAccountUpdateInput,
+	GangRoomRole,
+	GangRoomSummary,
 	MysqlColumn,
 	MysqlQueryResult,
 	MysqlSqlPolicy,
@@ -21,8 +20,7 @@ import type {
 	S3ObjectMetadata,
 	S3ReleaseSyncConfig,
 	S3ReleaseSyncResult,
-	S3ReleaseVersion,
-	SshActiveSession
+	S3ReleaseVersion
 } from '$lib/shared/ops-types';
 
 export class ApiClientError extends Error {
@@ -208,108 +206,77 @@ export class ApiClient {
 		});
 	}
 
-	async sshTicket(id: string) {
-		return this.request<{ ticket: string; expiresAt: string }>(`/api/ssh/${id}/ticket`, {
-			method: 'POST'
-		});
+	async accounts(query: { q?: string; status?: string; limit?: number; offset?: number } = {}) {
+		const params = new URLSearchParams();
+		if (query.q) params.set('q', query.q);
+		if (query.status) params.set('status', query.status);
+		params.set('limit', String(query.limit ?? 50));
+		params.set('offset', String(query.offset ?? 0));
+		return this.get<GangAccountList>(`/api/accounts?${params.toString()}`);
 	}
 
-	async sshSessions() {
-		return this.get<SshActiveSession[]>('/api/ssh/sessions');
+	async account(id: string) {
+		return this.get<GangAccountDetail>(`/api/accounts/${encodeURIComponent(id)}`);
 	}
 
-	async closeSshSession(id: string, confirmation: string) {
-		return this.request<{ closed: boolean }>(`/api/ssh/sessions/${id}`, {
-			method: 'DELETE',
-			headers: { 'x-ops-confirmation': confirmation }
-		});
+	async accountRooms(q = '') {
+		return this.get<GangRoomSummary[]>(`/api/accounts/rooms?q=${encodeURIComponent(q)}`);
 	}
 
-	async expenses(month?: string) {
-		return this.get<ExpenseEntry[]>(`/api/expenses${month ? `?month=${month}` : ''}`);
-	}
-
-	async expenseSummary(month: string) {
-		return this.get<ExpenseSummary>(`/api/expenses/summary?month=${month}`);
-	}
-
-	async createExpense(input: ExpenseInput) {
-		return this.request<ExpenseEntry>('/api/expenses', {
+	async createAccount(input: GangAccountCreateInput) {
+		return this.request<GangAccountDetail>('/api/accounts', {
 			method: 'POST',
 			body: JSON.stringify(input)
 		});
 	}
 
-	async updateExpense(id: string, input: ExpenseInput) {
-		return this.request<ExpenseEntry>(`/api/expenses/${id}`, {
-			method: 'PUT',
-			body: JSON.stringify(input)
+	async updateAccount(id: string, patch: GangAccountUpdateInput) {
+		return this.request<GangAccountDetail>(`/api/accounts/${encodeURIComponent(id)}`, {
+			method: 'PATCH',
+			body: JSON.stringify(patch)
 		});
 	}
 
-	async deleteExpense(id: string, confirmation: string) {
-		await this.raw(`/api/expenses/${id}`, {
-			method: 'DELETE',
-			headers: { 'x-ops-confirmation': confirmation }
-		});
-	}
-
-	async agentSuggest(goal: string, context: string) {
-		return this.request<AgentJob>('/api/agent/suggest', {
-			method: 'POST',
-			body: JSON.stringify({ goal, context })
-		});
-	}
-
-	async agentWorkers() {
-		return this.get<AgentWorkerStatus[]>('/api/agent/workers');
-	}
-
-	async agentSessions(workerId: string) {
-		return this.get<AgentOpsSession[]>(
-			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions`
+	async resetAccountPassword(id: string, password: string) {
+		return this.request<{ revokedSessions: number }>(
+			`/api/accounts/${encodeURIComponent(id)}/password`,
+			{ method: 'POST', body: JSON.stringify({ password }) }
 		);
 	}
 
-	async createAgentSession(workerId: string, input: { name?: string }) {
-		return this.request<AgentOpsSession>(
-			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions`,
-			{
-				method: 'POST',
-				body: JSON.stringify(input)
-			}
-		);
-	}
-
-	async agentSessionRuns(workerId: string, sessionId: string) {
-		return this.get<AgentOpsRun[]>(
-			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions/${encodeURIComponent(sessionId)}/runs`
-		);
-	}
-
-	async deleteAgentSession(workerId: string, sessionId: string) {
-		return this.request<{ deleted: boolean }>(
-			`/api/agent/workers/${encodeURIComponent(workerId)}/sessions/${encodeURIComponent(sessionId)}`,
-			{ method: 'DELETE' }
-		);
-	}
-
-	async agentWorkerTerminalTicket(workerId: string) {
-		return this.request<{ ticket: string; expiresAt: string }>(
-			`/api/agent/workers/${encodeURIComponent(workerId)}/terminal/ticket`,
+	async revokeAccountSessions(id: string) {
+		return this.request<{ revokedSessions: number }>(
+			`/api/accounts/${encodeURIComponent(id)}/sessions/revoke`,
 			{ method: 'POST' }
 		);
 	}
 
-	async agentRun(input: { workerId: string; sessionId: string; goal: string }) {
-		return this.request<AgentOpsRun>('/api/agent/run', {
-			method: 'POST',
-			body: JSON.stringify(input)
+	async deleteAccount(id: string, confirmation: string) {
+		return this.request<{ username: string }>(`/api/accounts/${encodeURIComponent(id)}`, {
+			method: 'DELETE',
+			headers: { 'x-ops-confirmation': confirmation }
 		});
 	}
 
-	async agentRunStatus(id: string) {
-		return this.get<AgentOpsRun>(`/api/agent/runs/${id}`);
+	async addAccountMembership(id: string, roomId: string, role: 'member' | 'admin') {
+		return this.request<{ role: GangRoomRole }>(
+			`/api/accounts/${encodeURIComponent(id)}/memberships`,
+			{ method: 'POST', body: JSON.stringify({ roomId, role }) }
+		);
+	}
+
+	async updateAccountMembership(id: string, roomId: string, role: GangRoomRole) {
+		return this.request<{ role: GangRoomRole }>(
+			`/api/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
+			{ method: 'PATCH', body: JSON.stringify({ role }) }
+		);
+	}
+
+	async removeAccountMembership(id: string, roomId: string) {
+		return this.request<{ username: string }>(
+			`/api/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
+			{ method: 'DELETE' }
+		);
 	}
 
 	private async get<T>(path: string, auth = true) {

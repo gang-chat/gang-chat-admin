@@ -1,19 +1,18 @@
 <script lang="ts">
-	import { Bot, Database, HardDrive, RefreshCw, Wallet } from '@lucide/svelte';
+	import { Database, HardDrive, RefreshCw, Users } from '@lucide/svelte';
 	import { onMount } from 'svelte';
 	import { base } from '$app/paths';
 	import { ApiClient, ApiClientError } from '$lib/api/client';
 	import brandMark from '$lib/assets/gang_chat.svg';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import AgentPanel from '$lib/components/ops/AgentPanel.svelte';
-	import ExpensesPanel from '$lib/components/ops/ExpensesPanel.svelte';
+	import AccountsPanel from '$lib/components/ops/AccountsPanel.svelte';
 	import MysqlWorkbench from '$lib/components/ops/MysqlWorkbench.svelte';
 	import S3Browser from '$lib/components/ops/S3Browser.svelte';
 	import type { RunTask } from '$lib/components/ops/types';
 	import type { AuthRole, AuthUser, ConnectionPreset } from '$lib/shared/ops-types';
 
-	type View = 'mysql' | 's3' | 'expenses' | 'agent';
+	type View = 'mysql' | 's3' | 'accounts';
 
 	const apiBase = base;
 
@@ -38,8 +37,7 @@
 	const navItems: Array<{ id: View; label: string; icon: typeof Database }> = [
 		{ id: 'mysql', label: 'MySQL', icon: Database },
 		{ id: 's3', label: 'S3', icon: HardDrive },
-		{ id: 'agent', label: 'Agent', icon: Bot },
-		{ id: 'expenses', label: 'Cost', icon: Wallet }
+		{ id: 'accounts', label: 'Accounts', icon: Users }
 	];
 
 	onMount(() => {
@@ -251,14 +249,9 @@
 			<S3Browser {api} {s3Connections} {currentRole} {run} onAuditRefresh={refreshAudit} />
 		</section>
 
-		<section id="agent" class="scroll-mt-6">
-			{@render sectionHeading('03', 'Agent')}
-			<AgentPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
-		</section>
-
-		<section id="expenses" class="scroll-mt-6">
-			{@render sectionHeading('04', 'Cost')}
-			<ExpensesPanel {api} {currentRole} {run} onAuditRefresh={refreshAudit} />
+		<section id="accounts" class="scroll-mt-6">
+			{@render sectionHeading('03', 'Accounts')}
+			<AccountsPanel {api} {mysqlConnections} {currentRole} {run} />
 		</section>
 
 		<aside class="wheel-rail" aria-label="Page navigation">

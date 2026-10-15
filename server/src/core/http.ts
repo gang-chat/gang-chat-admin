@@ -46,13 +46,6 @@ export async function requireAuth(
 	throw new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid session token');
 }
 
-export function requireAgentWorkerAuth(env: ServerConfig, request: FastifyRequest) {
-	const token = bearerToken(request);
-	if (token !== env.agentWorkerToken) {
-		throw new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid agent worker token');
-	}
-}
-
 export function requireConfirmation(actual: string | undefined, expected: string, message: string) {
 	if (actual !== expected) {
 		throw new HttpError(400, 'DESTRUCTIVE_CONFIRMATION_REQUIRED', message);

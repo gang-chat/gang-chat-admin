@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireRole } from '../../core/access-control';
-import { HttpError, ok, requireConfirmation } from '../../core/http';
+import { ok, requireConfirmation } from '../../core/http';
 import { idParamSchema, parseInput } from '../../core/validation';
 import type { AuditRepository } from '../audit/audit.repository';
 import { auditErrorDetail } from '../audit/audit-error';
@@ -101,9 +101,7 @@ export async function registerConnectionRoutes(
 		const preset = await deps.connections.get(id);
 		try {
 			if (preset.type === 'mysql') await deps.mysql.test(id);
-			else if (preset.type === 's3') await deps.s3.test(id);
-			else
-				throw new HttpError(400, 'SSH_TEST_UNSUPPORTED', 'Use the terminal workspace to test SSH');
+			else await deps.s3.test(id);
 			await deps.connections.setStatus(id, 'healthy');
 			await deps.audit.record({
 				action: 'connection.test',

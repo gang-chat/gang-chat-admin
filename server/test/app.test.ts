@@ -3,42 +3,25 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import type { RawData } from 'ws';
 import { S3Client } from '@aws-sdk/client-s3';
 import { buildApp } from '../src/app';
 import type { ServerConfig } from '../src/config/config';
-import type { AgentOpsRun, AgentWorkerStatus } from '../../src/lib/shared/ops-types';
-
-type TestWebSocket = {
-	send(data: string): void;
-	close(code?: number, reason?: string | Buffer): void;
-	terminate(): void;
-	once(event: 'message', listener: (data: RawData, isBinary: boolean) => void): void;
-	once(event: 'error', listener: (error: Error) => void): void;
-	once(event: 'close', listener: (code: number, reason: Buffer) => void): void;
-	off(event: 'message', listener: (data: RawData, isBinary: boolean) => void): void;
-	off(event: 'error', listener: (error: Error) => void): void;
-	off(event: 'close', listener: (code: number, reason: Buffer) => void): void;
-};
 
 async function withApp(
 	fn: (context: {
 		app: Awaited<ReturnType<typeof buildApp>>;
 		token: string;
-		agentWorkerToken: string;
 		dataDir: string;
 	}) => Promise<void>,
 	envOverrides: Partial<ServerConfig> = {}
 ) {
 	const dataDir = await mkdtemp(path.join(os.tmpdir(), 'gang-ops-api-'));
-	const agentWorkerToken = 'test-agent-worker-token';
 	const baseEnv: ServerConfig = {
 		host: '127.0.0.1',
 		port: 0,
 		basePath: '',
 		corsOrigin: ['http://localhost:8787'],
 		dataDir,
-		agentWorkerToken,
 		secretKey: Buffer.from('12345678901234567890123456789012'),
 		nodeEnv: 'test',
 		logLevel: 'info',
@@ -47,25 +30,14 @@ async function withApp(
 		rateLimitMax: 1000,
 		rateLimitWindow: '1 minute',
 		trustProxy: false,
-		sshMaxSessions: 12,
-		sshIdleTimeoutMs: 10 * 60 * 1000,
-		sshReadyTimeoutMs: 15_000,
-		sshKeepaliveIntervalMs: 20_000,
-		sshTicketTtlMs: 30_000,
-		sshRequireHostKeyVerification: false,
 		sessionTtlMs: 12 * 60 * 60 * 1000,
 		sessionIdleTimeoutMs: 30 * 60 * 1000,
 		bootstrapAdminUser: 'admin',
 		bootstrapAdminPassword: 'test-admin-password',
 		authMaxFailedLogins: 5,
 		authLockoutMs: 15 * 60 * 1000,
-		aiAdminWorker: {
-			baseUrl: 'https://llm.example.com/v1',
-			apiKey: 'test-ai-key',
-			model: 'ops-model'
-		},
 		releaseSync: null,
-		connections: { mysql: null, s3: null, ssh: [] }
+		connections: { mysql: null, s3: null }
 	};
 	const env: ServerConfig = { ...baseEnv, ...envOverrides };
 	const app = await buildApp(env);
@@ -76,7 +48,7 @@ async function withApp(
 			payload: { username: 'admin', password: 'test-admin-password' }
 		});
 		const token = login.json().data.token as string;
-		await fn({ app, token, agentWorkerToken, dataDir });
+		await fn({ app, token, dataDir });
 	} finally {
 		await app.close();
 		await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
@@ -85,72 +57,6 @@ async function withApp(
 
 function apiPath(env: ServerConfig, path: string) {
 	return `${env.basePath}${path}`;
-}
-
-function nextJsonMessage(socket: TestWebSocket, label = 'WebSocket message') {
-	return new Promise<Record<string, unknown>>((resolve, reject) => {
-		const timer = setTimeout(() => {
-			cleanup();
-			reject(new Error(`Timed out waiting for ${label}`));
-		}, 2_000);
-		const cleanup = () => {
-			clearTimeout(timer);
-			socket.off('message', onMessage);
-			socket.off('error', onError);
-			socket.off('close', onClose);
-		};
-		const onMessage = (raw: RawData) => {
-			cleanup();
-			resolve(JSON.parse(raw.toString()) as Record<string, unknown>);
-		};
-		const onError = (error: Error) => {
-			cleanup();
-			reject(error);
-		};
-		const onClose = () => {
-			cleanup();
-			reject(new Error('WebSocket closed before message'));
-		};
-		socket.once('message', onMessage);
-		socket.once('error', onError);
-		socket.once('close', onClose);
-	});
-}
-
-async function waitForRunStatus(
-	app: Awaited<ReturnType<typeof buildApp>>,
-	token: string,
-	id: string,
-	status: AgentOpsRun['status']
-) {
-	for (let attempt = 0; attempt < 20; attempt += 1) {
-		const response = await app.inject({
-			method: 'GET',
-			url: `/api/agent/runs/${id}`,
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(response.statusCode, 200);
-		const run = response.json().data as AgentOpsRun;
-		if (run.status === status) return run;
-		await new Promise((resolve) => setTimeout(resolve, 25));
-	}
-	throw new Error(`Timed out waiting for run ${id} to reach ${status}`);
-}
-
-async function waitForWorker(app: Awaited<ReturnType<typeof buildApp>>, token: string, id: string) {
-	for (let attempt = 0; attempt < 20; attempt += 1) {
-		const response = await app.inject({
-			method: 'GET',
-			url: '/api/agent/workers',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(response.statusCode, 200);
-		const workers = response.json().data as AgentWorkerStatus[];
-		const worker = workers.find((item) => item.id === id);
-		if (worker?.connected) return worker;
-		await new Promise((resolve) => setTimeout(resolve, 25));
-	}
-	throw new Error(`Timed out waiting for worker ${id}`);
 }
 
 function mysqlConnections(allowMutations = false): ServerConfig['connections'] {
@@ -169,8 +75,7 @@ function mysqlConnections(allowMutations = false): ServerConfig['connections'] {
 				allowMutations
 			}
 		},
-		s3: null,
-		ssh: []
+		s3: null
 	};
 }
 
@@ -190,29 +95,7 @@ function s3Connections(allowWrites = false): ServerConfig['connections'] {
 				accessKeyId: 'access-key',
 				secretAccessKey: 'secret-key'
 			}
-		},
-		ssh: []
-	};
-}
-
-function sshConnections(requireFingerprint = false): ServerConfig['connections'] {
-	return {
-		mysql: null,
-		s3: null,
-		ssh: [
-			{
-				id: 'ssh-host',
-				type: 'ssh',
-				name: 'prod-shell',
-				config: {
-					host: '127.0.0.1',
-					port: 22,
-					username: 'ops',
-					password: 'ssh-secret',
-					hostKeySha256: requireFingerprint ? undefined : 'SHA256:testfingerprint'
-				}
-			}
-		]
+		}
 	};
 }
 
@@ -809,15 +692,10 @@ test.skip('session roles enforce viewer, operator, and admin boundaries', async 
 			url: '/api/connections',
 			headers: { authorization: `Bearer ${operatorToken}` },
 			payload: {
-				type: 'ssh',
-				name: 'prod-shell',
+				type: 'mysql',
+				name: 'other-db',
 				tags: [],
-				config: {
-					host: '127.0.0.1',
-					port: 22,
-					username: 'root',
-					password: 'secret'
-				}
+				config: { host: '127.0.0.1', port: 3306, database: 'gang', user: 'ops', ssl: false }
 			}
 		});
 		const operatorCannotListUsers = await app.inject({
@@ -904,13 +782,13 @@ test('connection delete is disabled for configured presets', async () => {
 		async ({ app, token }) => {
 			const deleted = await app.inject({
 				method: 'DELETE',
-				url: '/api/connections/ssh-host',
-				headers: { authorization: `Bearer ${token}`, 'x-ops-confirmation': 'ssh-host' }
+				url: '/api/connections/primary-db',
+				headers: { authorization: `Bearer ${token}`, 'x-ops-confirmation': 'primary-db' }
 			});
 			assert.equal(deleted.statusCode, 409);
 			assert.equal(deleted.json().error.code, 'CONNECTIONS_CONFIG_READ_ONLY');
 		},
-		{ connections: sshConnections() }
+		{ connections: mysqlConnections() }
 	);
 });
 
@@ -1034,472 +912,6 @@ test.skip('admin backup restore validates inner store shape before writing', asy
 	});
 });
 
-test.skip('agent jobs are persisted and approval-gated', async () => {
-	await withApp(async ({ app, token }) => {
-		const created = await app.inject({
-			method: 'POST',
-			url: '/api/agent/suggest',
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				goal: 'inspect api latency',
-				context: 'api host is slow after deploy'
-			}
-		});
-		const job = created.json().data;
-
-		assert.equal(created.statusCode, 200);
-		assert.equal(job.status, 'suggested');
-		assert.equal(job.goal, 'inspect api latency');
-
-		const listed = await app.inject({
-			method: 'GET',
-			url: '/api/agent/jobs?status=suggested',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(listed.statusCode, 200);
-		assert.equal(listed.json().data.length, 1);
-		assert.equal(listed.json().data[0].id, job.id);
-
-		const approved = await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${job.id}/approve`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				operatorNote: 'read-only checks approved',
-				commands: [
-					{
-						label: 'Check API service status',
-						command: 'systemctl status gang-api --no-pager',
-						requiresApproval: true
-					}
-				]
-			}
-		});
-		assert.equal(approved.statusCode, 200);
-		assert.equal(approved.json().data.status, 'approved');
-		assert.equal(approved.json().data.operatorNote, 'read-only checks approved');
-		assert.deepEqual(approved.json().data.commands, [
-			{
-				label: 'Check API service status',
-				command: 'systemctl status gang-api --no-pager',
-				requiresApproval: true
-			}
-		]);
-
-		const rejectedAgain = await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${job.id}/reject`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: { operatorNote: 'too late' }
-		});
-		assert.equal(rejectedAgain.statusCode, 409);
-
-		const audit = await app.inject({
-			method: 'GET',
-			url: '/api/audit?limit=10&action=agent.job',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(audit.statusCode, 200);
-		assert.equal(audit.json().data[0].action, 'agent.job.approve');
-		assert.equal(audit.json().data[0].target, job.id);
-	});
-});
-
-test('agent approval validates operator-edited command lists', async () => {
-	await withApp(async ({ app, token }) => {
-		const created = await app.inject({
-			method: 'POST',
-			url: '/api/agent/suggest',
-			headers: { authorization: `Bearer ${token}` },
-			payload: { goal: 'inspect api worker' }
-		});
-		const jobId = created.json().data.id;
-
-		const emptyCommands = await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${jobId}/approve`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: { commands: [] }
-		});
-		assert.equal(emptyCommands.statusCode, 400);
-		assert.equal(emptyCommands.json().error.code, 'VALIDATION_ERROR');
-
-		const blankCommand = await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${jobId}/approve`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				commands: [{ label: 'Blank command', command: '', requiresApproval: true }]
-			}
-		});
-		assert.equal(blankCommand.statusCode, 400);
-		assert.equal(blankCommand.json().error.code, 'VALIDATION_ERROR');
-	});
-});
-
-test('ai admin worker websocket receives config and drives ops runs', async () => {
-	await withApp(async ({ app, token, agentWorkerToken }) => {
-		await app.ready();
-		let initPromise: Promise<Record<string, unknown>> | undefined;
-		const worker = (await app.injectWS(
-			`/ws/ai-admin-worker?token=${encodeURIComponent(agentWorkerToken)}`,
-			{},
-			{
-				onInit(ws) {
-					initPromise = nextJsonMessage(ws as unknown as TestWebSocket, 'worker init config');
-				}
-			}
-		)) as unknown as TestWebSocket;
-
-		try {
-			const init = await initPromise!;
-			assert.equal(init.type, 'init_config');
-			assert.deepEqual(init.config, {
-				baseUrl: 'https://llm.example.com/v1',
-				apiKey: 'test-ai-key',
-				model: 'ops-model',
-				contextWindow: 256_000,
-				compactAt: 0.9
-			});
-
-			worker.send(
-				JSON.stringify({
-					type: 'hello',
-					workerId: 'ai-worker-test',
-					version: 'test',
-					apiBase: 'http://127.0.0.1:8787',
-					hostname: 'test-host',
-					execute: true,
-					allowedCommands: ['*'],
-					terminal: {
-						available: true,
-						username: 'test-user',
-						shell: '/bin/sh',
-						cwd: '/srv/app'
-					}
-				})
-			);
-			const listedWorker = await waitForWorker(app, token, 'ai-worker-test');
-			assert.equal(listedWorker.transport, 'websocket');
-			assert.equal(listedWorker.hostname, 'test-host');
-			assert.equal(listedWorker.terminal?.available, true);
-			assert.equal(listedWorker.terminal?.username, 'test-user');
-			assert.equal(listedWorker.terminal?.shell, '/bin/sh');
-			assert.equal(listedWorker.terminal?.cwd, '/srv/app');
-
-			const ticketResponse = await app.inject({
-				method: 'POST',
-				url: '/api/agent/workers/ai-worker-test/terminal/ticket',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(ticketResponse.statusCode, 200);
-			const ticket = ticketResponse.json().data.ticket as string;
-			assert.ok(ticket);
-
-			const terminalOpenPromise = nextJsonMessage(worker, 'terminal_open');
-			const terminal = (await app.injectWS(
-				`/ws/agent/workers/ai-worker-test/terminal?ticket=${encodeURIComponent(ticket)}&cols=90&rows=24`
-			)) as unknown as TestWebSocket;
-			const terminalOpen = await terminalOpenPromise;
-			assert.equal(terminalOpen.type, 'terminal_open');
-			assert.equal(terminalOpen.cols, 90);
-			assert.equal(terminalOpen.rows, 24);
-			const terminalId = terminalOpen.terminalId as string;
-			assert.ok(terminalId);
-
-			const terminalInputPromise = nextJsonMessage(worker, 'terminal_input');
-			terminal.send(JSON.stringify({ type: 'input', data: 'pwd\n' }));
-			const terminalInput = await terminalInputPromise;
-			assert.equal(terminalInput.type, 'terminal_input');
-			assert.equal(terminalInput.terminalId, terminalId);
-			assert.equal(terminalInput.data, 'pwd\n');
-
-			const terminalOutputPromise = nextJsonMessage(terminal, 'terminal_output');
-			worker.send(
-				JSON.stringify({
-					type: 'terminal_output',
-					terminalId,
-					data: '/srv/app\r\n'
-				})
-			);
-			const terminalOutput = await terminalOutputPromise;
-			assert.deepEqual(terminalOutput, { type: 'data', data: '/srv/app\r\n' });
-
-			const terminalStatusPromise = nextJsonMessage(terminal, 'terminal closed status');
-			worker.send(JSON.stringify({ type: 'terminal_status', terminalId, status: 'closed' }));
-			const terminalStatus = await terminalStatusPromise;
-			assert.deepEqual(terminalStatus, { type: 'status', status: 'closed' });
-
-			const createdSession = await app.inject({
-				method: 'POST',
-				url: '/api/agent/workers/ai-worker-test/sessions',
-				headers: { authorization: `Bearer ${token}` },
-				payload: {}
-			});
-			assert.equal(createdSession.statusCode, 200);
-			const session = createdSession.json().data;
-			assert.equal(session.workerId, 'ai-worker-test');
-			assert.equal(session.name, 'New session');
-			assert.equal(session.titleSource, 'auto');
-
-			const listedSessions = await app.inject({
-				method: 'GET',
-				url: '/api/agent/workers/ai-worker-test/sessions',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(listedSessions.statusCode, 200);
-			assert.equal(listedSessions.json().data[0].id, session.id);
-
-			const promptPromise = nextJsonMessage(worker, 'ops prompt');
-			const created = await app.inject({
-				method: 'POST',
-				url: '/api/agent/run',
-				headers: { authorization: `Bearer ${token}` },
-				payload: {
-					workerId: 'ai-worker-test',
-					sessionId: session.id,
-					goal: 'inspect api latency'
-				}
-			});
-			assert.equal(created.statusCode, 200);
-			const run = created.json().data;
-			assert.equal(run.status, 'queued');
-
-			const titledSessions = await app.inject({
-				method: 'GET',
-				url: '/api/agent/workers/ai-worker-test/sessions',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(titledSessions.statusCode, 200);
-			assert.equal(titledSessions.json().data[0].name, 'inspect api latency');
-
-			const prompt = await promptPromise;
-			assert.equal(prompt.type, 'prompt');
-			const promptPayload = prompt.prompt as {
-				runId: string;
-				sessionId: string;
-				goal: string;
-			};
-			assert.equal(promptPayload.runId, run.id);
-			assert.equal(promptPayload.sessionId, session.id);
-			assert.equal(promptPayload.goal, 'inspect api latency');
-
-			worker.send(JSON.stringify({ type: 'run_started', runId: run.id }));
-			worker.send(
-				JSON.stringify({
-					type: 'context_compacted',
-					runId: run.id,
-					message: 'Context compacted at threshold'
-				})
-			);
-			worker.send(JSON.stringify({ type: 'text_delta', runId: run.id, text: 'check ' }));
-			worker.send(JSON.stringify({ type: 'text_delta', runId: run.id, text: 'latency' }));
-			worker.send(
-				JSON.stringify({
-					type: 'run_completed',
-					runId: run.id,
-					result: 'check latency'
-				})
-			);
-
-			const completed = await waitForRunStatus(app, token, run.id, 'completed');
-			assert.equal(completed.result, 'check latency');
-			assert.ok(completed.events.some((event) => event.type === 'compact'));
-			assert.equal(completed.events.at(-1)?.type, 'done');
-
-			const sessionRuns = await app.inject({
-				method: 'GET',
-				url: `/api/agent/workers/ai-worker-test/sessions/${session.id}/runs`,
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(sessionRuns.statusCode, 200);
-			assert.equal(sessionRuns.json().data[0].id, run.id);
-
-			const deletedSession = await app.inject({
-				method: 'DELETE',
-				url: `/api/agent/workers/ai-worker-test/sessions/${session.id}`,
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(deletedSession.statusCode, 200);
-			assert.equal(deletedSession.json().data.deleted, true);
-
-			const sessionsAfterDelete = await app.inject({
-				method: 'GET',
-				url: '/api/agent/workers/ai-worker-test/sessions',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(sessionsAfterDelete.statusCode, 200);
-			assert.equal(
-				sessionsAfterDelete.json().data.some((item: { id: string }) => item.id === session.id),
-				false
-			);
-		} finally {
-			worker.terminate();
-			await new Promise((resolve) => setTimeout(resolve, 25));
-		}
-	});
-});
-
-test.skip('agent worker API uses separate auth and records execution lifecycle', async () => {
-	await withApp(async ({ app, token, agentWorkerToken }) => {
-		const workerDeniedForAdmin = await app.inject({
-			method: 'GET',
-			url: '/api/agent/worker/jobs',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		const adminDeniedForWorker = await app.inject({
-			method: 'GET',
-			url: '/api/connections',
-			headers: { authorization: `Bearer ${agentWorkerToken}` }
-		});
-		assert.equal(workerDeniedForAdmin.statusCode, 401);
-		assert.equal(adminDeniedForWorker.statusCode, 401);
-
-		const heartbeat = await app.inject({
-			method: 'POST',
-			url: '/api/agent/worker/heartbeat',
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: {
-				workerId: 'pi-worker-01',
-				apiBase: 'http://127.0.0.1:8787',
-				hostname: 'pi-ops',
-				version: '0.0.1',
-				execute: false,
-				allowedCommands: ['hostnamectl', 'uptime']
-			}
-		});
-		assert.equal(heartbeat.statusCode, 200);
-		assert.equal(heartbeat.json().data.id, 'pi-worker-01');
-
-		const workers = await app.inject({
-			method: 'GET',
-			url: '/api/agent/workers',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(workers.statusCode, 200);
-		assert.equal(workers.json().data.length, 1);
-		assert.equal(workers.json().data[0].id, 'pi-worker-01');
-		assert.equal(workers.json().data[0].hostname, 'pi-ops');
-		assert.deepEqual(workers.json().data[0].allowedCommands, ['hostnamectl', 'uptime']);
-
-		const created = await app.inject({
-			method: 'POST',
-			url: '/api/agent/suggest',
-			headers: { authorization: `Bearer ${token}` },
-			payload: { goal: 'restart stalled queue worker' }
-		});
-		const firstJobId = created.json().data.id;
-
-		const emptyQueue = await app.inject({
-			method: 'GET',
-			url: '/api/agent/worker/jobs',
-			headers: { authorization: `Bearer ${agentWorkerToken}` }
-		});
-		assert.equal(emptyQueue.statusCode, 200);
-		assert.equal(emptyQueue.json().data.length, 0);
-
-		const approved = await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${firstJobId}/approve`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: { operatorNote: 'approved for worker execution' }
-		});
-		assert.equal(approved.statusCode, 200);
-		assert.equal(approved.json().data.executionStatus, 'queued');
-
-		const queue = await app.inject({
-			method: 'GET',
-			url: '/api/agent/worker/jobs?limit=5',
-			headers: { authorization: `Bearer ${agentWorkerToken}` }
-		});
-		assert.equal(queue.statusCode, 200);
-		assert.equal(queue.json().data.length, 1);
-		assert.equal(queue.json().data[0].id, firstJobId);
-
-		const started = await app.inject({
-			method: 'POST',
-			url: `/api/agent/worker/jobs/${firstJobId}/start`,
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: { workerId: 'pi-worker-01' }
-		});
-		assert.equal(started.statusCode, 200);
-		assert.equal(started.json().data.executionStatus, 'running');
-		assert.equal(started.json().data.workerId, 'pi-worker-01');
-
-		const mismatchedComplete = await app.inject({
-			method: 'POST',
-			url: `/api/agent/worker/jobs/${firstJobId}/complete`,
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: { workerId: 'pi-worker-02', result: 'done' }
-		});
-		assert.equal(mismatchedComplete.statusCode, 409);
-		assert.equal(mismatchedComplete.json().error.code, 'AGENT_JOB_WORKER_MISMATCH');
-
-		const completed = await app.inject({
-			method: 'POST',
-			url: `/api/agent/worker/jobs/${firstJobId}/complete`,
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: {
-				workerId: 'pi-worker-01',
-				result: 'service restarted',
-				commandResults: [
-					{
-						label: 'Restart service',
-						command: 'systemctl restart queue-worker',
-						exitCode: 0,
-						stdout: 'ok'
-					}
-				]
-			}
-		});
-		assert.equal(completed.statusCode, 200);
-		assert.equal(completed.json().data.executionStatus, 'completed');
-		assert.equal(completed.json().data.result, 'service restarted');
-		assert.equal(completed.json().data.commandResults[0].exitCode, 0);
-
-		const createdForFailure = await app.inject({
-			method: 'POST',
-			url: '/api/agent/suggest',
-			headers: { authorization: `Bearer ${token}` },
-			payload: { goal: 'inspect failed backup job' }
-		});
-		const secondJobId = createdForFailure.json().data.id;
-		await app.inject({
-			method: 'POST',
-			url: `/api/agent/jobs/${secondJobId}/approve`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: {}
-		});
-		await app.inject({
-			method: 'POST',
-			url: `/api/agent/worker/jobs/${secondJobId}/start`,
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: { workerId: 'pi-worker-01' }
-		});
-		const failed = await app.inject({
-			method: 'POST',
-			url: `/api/agent/worker/jobs/${secondJobId}/fail`,
-			headers: { authorization: `Bearer ${agentWorkerToken}` },
-			payload: { workerId: 'pi-worker-01', error: 'ssh permission denied' }
-		});
-		assert.equal(failed.statusCode, 200);
-		assert.equal(failed.json().data.executionStatus, 'failed');
-		assert.equal(failed.json().data.error, 'ssh permission denied');
-
-		const audit = await app.inject({
-			method: 'GET',
-			url: '/api/audit?limit=10&action=agent.worker',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(audit.statusCode, 200);
-		assert.deepEqual(
-			audit.json().data.map((event: { action: string }) => event.action),
-			['agent.worker.fail', 'agent.worker.start', 'agent.worker.complete', 'agent.worker.start']
-		);
-		assert.equal(audit.json().data[0].actor, 'pi-worker-01');
-	});
-});
-
 test.skip('failed MySQL SQL attempts are audited', async () => {
 	await withApp(
 		async ({ app, token }) => {
@@ -1592,119 +1004,6 @@ test('MySQL destructive operations require explicit confirmations before adapter
 		},
 		{ connections: mysqlConnections(true) }
 	);
-});
-
-test.skip('expense API validates body and returns monthly summary', async () => {
-	await withApp(async ({ app, token }) => {
-		const created = await app.inject({
-			method: 'POST',
-			url: '/api/expenses',
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				month: '2026-07',
-				category: 'server',
-				vendor: 'cloud-a',
-				amount: '42.5',
-				currency: 'cny'
-			}
-		});
-
-		assert.equal(created.statusCode, 200);
-		assert.equal(created.json().data.amount, 42.5);
-		const expenseId = created.json().data.id;
-
-		const updated = await app.inject({
-			method: 'PUT',
-			url: `/api/expenses/${expenseId}`,
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				month: '2026-07',
-				category: 'storage',
-				vendor: 'cloud-a',
-				amount: 52.75,
-				currency: 'cny',
-				note: 'object storage'
-			}
-		});
-
-		const summary = await app.inject({
-			method: 'GET',
-			url: '/api/expenses/summary?month=2026-07',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		const audit = await app.inject({
-			method: 'GET',
-			url: '/api/audit?limit=10&status=ok&action=expense',
-			headers: { authorization: `Bearer ${token}` }
-		});
-
-		assert.equal(updated.statusCode, 200);
-		assert.equal(updated.json().data.category, 'storage');
-		assert.equal(updated.json().data.amount, 52.75);
-		assert.equal(summary.statusCode, 200);
-		assert.equal(summary.json().data.total, 52.75);
-		assert.equal(audit.statusCode, 200);
-		assert.deepEqual(
-			audit.json().data.map((event: { action: string }) => event.action),
-			['expense.update', 'expense.create']
-		);
-	});
-});
-
-test('expense delete requires exact expense id confirmation', async () => {
-	await withApp(async ({ app, token }) => {
-		const created = await app.inject({
-			method: 'POST',
-			url: '/api/expenses',
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				month: '2026-07',
-				category: 'server',
-				vendor: 'cloud-a',
-				amount: 42,
-				currency: 'CNY'
-			}
-		});
-		assert.equal(created.statusCode, 200);
-		const expenseId = created.json().data.id;
-
-		const missingConfirmation = await app.inject({
-			method: 'DELETE',
-			url: `/api/expenses/${expenseId}`,
-			headers: { authorization: `Bearer ${token}` }
-		});
-		const wrongConfirmation = await app.inject({
-			method: 'DELETE',
-			url: `/api/expenses/${expenseId}`,
-			headers: { authorization: `Bearer ${token}`, 'x-ops-confirmation': 'wrong-id' }
-		});
-		const listedAfterRejectedDeletes = await app.inject({
-			method: 'GET',
-			url: '/api/expenses?month=2026-07',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		const deleted = await app.inject({
-			method: 'DELETE',
-			url: `/api/expenses/${expenseId}`,
-			headers: { authorization: `Bearer ${token}`, 'x-ops-confirmation': expenseId }
-		});
-
-		assert.equal(missingConfirmation.statusCode, 400);
-		assert.equal(missingConfirmation.json().error.code, 'DESTRUCTIVE_CONFIRMATION_REQUIRED');
-		assert.equal(wrongConfirmation.statusCode, 400);
-		assert.equal(wrongConfirmation.json().error.code, 'DESTRUCTIVE_CONFIRMATION_REQUIRED');
-		assert.equal(listedAfterRejectedDeletes.statusCode, 200);
-		assert.equal(listedAfterRejectedDeletes.json().data.length, 1);
-		assert.equal(deleted.statusCode, 204);
-
-		const listedAfterDelete = await app.inject({
-			method: 'GET',
-			url: '/api/expenses?month=2026-07',
-			headers: { authorization: `Bearer ${token}` }
-		});
-		assert.equal(listedAfterDelete.statusCode, 200);
-		assert.equal(listedAfterDelete.json().data.length, 0);
-	});
 });
 
 test.skip('audit records request actor from x-ops-actor header with admin fallback', async () => {
@@ -1825,130 +1124,6 @@ test.skip('audit export returns events with an external checkpoint', async () =>
 		});
 		assert.equal(audit.statusCode, 200);
 		assert.equal(audit.json().data[0].status, 'ok');
-	});
-});
-
-test('SSH ticket API issues short-lived tickets without exposing admin token', async () => {
-	await withApp(
-		async ({ app, token }) => {
-			const connectionId = 'ssh-host';
-
-			const denied = await app.inject({
-				method: 'POST',
-				url: `/api/ssh/${connectionId}/ticket`
-			});
-			const ticket = await app.inject({
-				method: 'POST',
-				url: `/api/ssh/${connectionId}/ticket`,
-				headers: { authorization: `Bearer ${token}` }
-			});
-
-			assert.equal(denied.statusCode, 401);
-			assert.equal(ticket.statusCode, 200);
-			assert.equal(typeof ticket.json().data.ticket, 'string');
-			assert.equal(JSON.stringify(ticket.json()).includes(token), false);
-			assert.match(ticket.json().data.expiresAt, /^\d{4}-\d{2}-\d{2}T/);
-		},
-		{ connections: sshConnections() }
-	);
-});
-
-test.skip('SSH ticket API requires host key fingerprints when configured', async () => {
-	await withApp(
-		async ({ app, token }) => {
-			const ticket = await app.inject({
-				method: 'POST',
-				url: '/api/ssh/ssh-host/ticket',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(ticket.statusCode, 400);
-			assert.equal(ticket.json().error.code, 'SSH_HOST_KEY_REQUIRED');
-
-			const audit = await app.inject({
-				method: 'GET',
-				url: '/api/audit?limit=5&action=ssh.ticket',
-				headers: { authorization: `Bearer ${token}` }
-			});
-			assert.equal(audit.statusCode, 200);
-			assert.equal(audit.json().data[0].status, 'failed');
-			assert.equal(audit.json().data[0].target, 'ssh-host');
-		},
-		{ sshRequireHostKeyVerification: true, connections: sshConnections(true) }
-	);
-});
-
-test.skip('SSH active session control plane is operator gated and confirmation protected', async () => {
-	await withApp(async ({ app, token }) => {
-		const viewer = await app.inject({
-			method: 'POST',
-			url: '/api/auth/users',
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				username: 'ssh-viewer',
-				displayName: 'SSH Viewer',
-				role: 'viewer',
-				password: 'Read-Only-Key-2026!'
-			}
-		});
-		const operator = await app.inject({
-			method: 'POST',
-			url: '/api/auth/users',
-			headers: { authorization: `Bearer ${token}` },
-			payload: {
-				username: 'ssh-operator',
-				displayName: 'SSH Operator',
-				role: 'operator',
-				password: 'Run-Term-Key-2026!'
-			}
-		});
-		assert.equal(viewer.statusCode, 200);
-		assert.equal(operator.statusCode, 200);
-
-		const viewerLogin = await app.inject({
-			method: 'POST',
-			url: '/api/auth/login',
-			payload: { username: 'ssh-viewer', password: 'Read-Only-Key-2026!' }
-		});
-		const operatorLogin = await app.inject({
-			method: 'POST',
-			url: '/api/auth/login',
-			payload: { username: 'ssh-operator', password: 'Run-Term-Key-2026!' }
-		});
-		const viewerToken = viewerLogin.json().data.token;
-		const operatorToken = operatorLogin.json().data.token;
-
-		const viewerDenied = await app.inject({
-			method: 'GET',
-			url: '/api/ssh/sessions',
-			headers: { authorization: `Bearer ${viewerToken}` }
-		});
-		const listed = await app.inject({
-			method: 'GET',
-			url: '/api/ssh/sessions',
-			headers: { authorization: `Bearer ${operatorToken}` }
-		});
-		const unconfirmedDelete = await app.inject({
-			method: 'DELETE',
-			url: '/api/ssh/sessions/missing-session',
-			headers: { authorization: `Bearer ${operatorToken}` }
-		});
-		const missingDelete = await app.inject({
-			method: 'DELETE',
-			url: '/api/ssh/sessions/missing-session',
-			headers: {
-				authorization: `Bearer ${operatorToken}`,
-				'x-ops-confirmation': 'missing-session'
-			}
-		});
-
-		assert.equal(viewerDenied.statusCode, 403);
-		assert.equal(viewerDenied.json().error.code, 'FORBIDDEN_ROLE');
-		assert.equal(listed.statusCode, 200);
-		assert.deepEqual(listed.json().data, []);
-		assert.equal(unconfirmedDelete.statusCode, 400);
-		assert.equal(unconfirmedDelete.json().error.code, 'DESTRUCTIVE_CONFIRMATION_REQUIRED');
-		assert.equal(missingDelete.statusCode, 404);
-		assert.equal(missingDelete.json().error.code, 'SSH_SESSION_NOT_FOUND');
 	});
 });
 
@@ -2231,4 +1406,71 @@ test('S3 routes validate object inputs before hitting storage adapters', async (
 		assert.equal(deleteWrongConfirmation.json().error.code, 'DESTRUCTIVE_CONFIRMATION_REQUIRED');
 		assert.equal(releaseSyncMissingTag.json().error.code, 'VALIDATION_ERROR');
 	});
+});
+
+test('account admin needs the Gang Chat MySQL preset', async () => {
+	await withApp(async ({ app, token }) => {
+		const listed = await app.inject({
+			method: 'GET',
+			url: '/api/accounts',
+			headers: { authorization: `Bearer ${token}` }
+		});
+		assert.equal(listed.statusCode, 409);
+		assert.equal(listed.json().error.code, 'ACCOUNTS_UNAVAILABLE');
+	});
+});
+
+test('account changes are blocked unless the MySQL preset allows writes', async () => {
+	await withApp(
+		async ({ app, token }) => {
+			const created = await app.inject({
+				method: 'POST',
+				url: '/api/accounts',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { username: 'new_user', email: 'new@example.test', password: 'long-enough-1' }
+			});
+			const removed = await app.inject({
+				method: 'DELETE',
+				url: '/api/accounts/u-1/memberships/r-1',
+				headers: { authorization: `Bearer ${token}` }
+			});
+			assert.equal(created.statusCode, 403);
+			assert.equal(created.json().error.code, 'MYSQL_MUTATIONS_DISABLED');
+			assert.equal(removed.statusCode, 403);
+			assert.equal(removed.json().error.code, 'MYSQL_MUTATIONS_DISABLED');
+		},
+		{ connections: mysqlConnections() }
+	);
+});
+
+test('account input is validated like the Gang Chat server before touching MySQL', async () => {
+	await withApp(
+		async ({ app, token }) => {
+			const badUsername = await app.inject({
+				method: 'POST',
+				url: '/api/accounts',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { username: 'no spaces', email: 'a@example.test', password: 'long-enough-1' }
+			});
+			const shortPassword = await app.inject({
+				method: 'POST',
+				url: '/api/accounts/u-1/password',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { password: 'short' }
+			});
+			const badRole = await app.inject({
+				method: 'PATCH',
+				url: '/api/accounts/u-1/memberships/r-1',
+				headers: { authorization: `Bearer ${token}` },
+				payload: { role: 'superuser' }
+			});
+			assert.equal(badUsername.statusCode, 400);
+			assert.match(badUsername.json().error.message, /Username must be 3-32/);
+			assert.equal(shortPassword.statusCode, 400);
+			assert.match(shortPassword.json().error.message, /8-256 characters/);
+			assert.equal(badRole.statusCode, 400);
+			assert.equal(badRole.json().error.code, 'VALIDATION_ERROR');
+		},
+		{ connections: mysqlConnections(true) }
+	);
 });

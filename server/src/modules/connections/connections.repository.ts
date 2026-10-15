@@ -5,10 +5,13 @@ import type {
 	ConnectionStatus,
 	ConnectionType,
 	MysqlSecretConfig,
-	S3SecretConfig,
-	SshSecretConfig
+	S3SecretConfig
 } from '../../../../src/lib/shared/ops-types';
-import type { ConfigConnectionInput, ConfigConnections, ConfigS3ConnectionInput } from '../../config/config';
+import type {
+	ConfigConnectionInput,
+	ConfigConnections,
+	ConfigS3ConnectionInput
+} from '../../config/config';
 import { HttpError } from '../../core/http';
 
 type StoredPreset = Omit<ConnectionPreset, 'config'> & {
@@ -21,16 +24,16 @@ export class ConnectionsRepository {
 
 	constructor(connections: ConfigConnections) {
 		const now = new Date().toISOString();
-		this.presets = [connections.mysql, connections.s3, ...connections.ssh]
+		this.presets = [connections.mysql, connections.s3]
 			.filter((input): input is NonNullable<typeof input> => Boolean(input))
 			.map((input) => ({
-			id: input.id?.trim() || stableConnectionId(input),
-			name: input.name.trim(),
-			type: input.type,
-			tags: input.tags ?? [],
-			status: 'unknown',
-			config: publicConfig(input),
-			secrets: secretConfig(input),
+				id: input.id?.trim() || stableConnectionId(input),
+				name: input.name.trim(),
+				type: input.type,
+				tags: input.tags ?? [],
+				status: 'unknown',
+				config: publicConfig(input),
+				secrets: secretConfig(input),
 				createdAt: now,
 				updatedAt: now
 			}));
@@ -97,27 +100,16 @@ function publicConfig(input: ConfigConnectionInput | ConfigS3ConnectionInput) {
 		const { host, port, database, user, ssl, allowMutations } = input.config;
 		return { host, port, database, user, ssl, allowMutations };
 	}
-	if (input.type === 's3') {
-		const { endpoint, region, defaultBucket, forcePathStyle, allowWrites } = input.config;
-		return { endpoint, region, defaultBucket, forcePathStyle, allowWrites };
-	}
-	const { host, port, username, hostKeySha256 } = input.config;
-	return { host, port, username, hostKeySha256 };
+	const { endpoint, region, defaultBucket, forcePathStyle, allowWrites } = input.config;
+	return { endpoint, region, defaultBucket, forcePathStyle, allowWrites };
 }
 
-function secretConfig(input: ConnectionInput): MysqlSecretConfig | S3SecretConfig | SshSecretConfig {
+function secretConfig(input: ConnectionInput): MysqlSecretConfig | S3SecretConfig {
 	if (input.type === 'mysql') return { password: input.config.password };
-	if (input.type === 's3') {
-		return {
-			accessKeyId: input.config.accessKeyId,
-			secretAccessKey: input.config.secretAccessKey,
-			sessionToken: input.config.sessionToken
-		};
-	}
 	return {
-		password: input.config.password,
-		privateKey: input.config.privateKey,
-		passphrase: input.config.passphrase
+		accessKeyId: input.config.accessKeyId,
+		secretAccessKey: input.config.secretAccessKey,
+		sessionToken: input.config.sessionToken
 	};
 }
 

@@ -6,9 +6,12 @@ SvelteKit + Fastify operations panel for Gang Chat infrastructure.
 
 - MySQL workbench for table browsing.
 - S3-compatible single-bucket file manager with upload, download and delete actions.
-- Multi-pane SSH terminal workspace over WebSocket.
-- Pi Agent suggestion entry and manual cost ledger.
+- Gang Chat account admin: accounts, sign-in access, and room membership and roles.
 - Session login and role-based access.
+
+The console has no shell or command execution: the SSH terminal and the AI admin worker were
+removed. Old `config.json` keys for them (`agentWorkerToken`, `aiAdminWorker`, `ssh*`,
+`connections.ssh`) are ignored and can be deleted.
 
 ## Configuration
 
@@ -25,7 +28,7 @@ Required login credentials are configured directly in `config.json`:
 
 The server refuses to start if required config fields are missing. In production, `adminPassword` must satisfy the backend password policy.
 
-Connection presets are also configured in `config.json` and are read-only at runtime. MySQL has one connection, S3 has one connection bound to one bucket, and SSH supports multiple hosts:
+Connection presets are also configured in `config.json` and are read-only at runtime. MySQL has one connection and S3 has one connection bound to one bucket:
 
 ```json
 {
@@ -57,23 +60,46 @@ Connection presets are also configured in `config.json` and are read-only at run
 				"accessKeyId": "change-me",
 				"secretAccessKey": "change-me"
 			}
-		},
-		"ssh": [
-			{
-				"id": "pi-1",
-				"type": "ssh",
-				"name": "Pi 1",
-				"config": {
-					"host": "192.168.1.10",
-					"port": 22,
-					"username": "pi",
-					"password": "change-me"
-				}
-			}
-		]
+		}
 	}
 }
 ```
+
+## Account Admin
+
+The Accounts panel manages Gang Chat users directly in the Gang Chat database, through the
+`connections.mysql` preset (so that preset must point at the Gang Chat database). Reading needs
+any role; changes need the `operator` role and `allowMutations: true` on the preset; deleting an
+account needs the `admin` role and the exact username typed as confirmation. Every change is
+recorded in the audit log, including refused and failed attempts.
+
+| Action               | What it writes                                                                           |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| Create               | A new active user with a verified email, the next free UID and an argon2id password hash |
+| Edit                 | Username, email (marks it unverified unless you tick verified), display name             |
+| Suspend / reactivate | `users.status`; suspending also signs the account out everywhere                         |
+| Sign out everywhere  | Revokes all of the account's sessions                                                    |
+| Reset password       | New hash, and every session is signed out                                                |
+| Delete               | The user and everything that cascades from it; their messages stay with a name snapshot  |
+| Rooms and roles      | Add to a room, change member/admin, make owner, remove from a room                       |
+
+Each write runs in one transaction and mirrors the SQL the Gang Chat server runs for the same
+action (`internal/auth` and `internal/chat` in gang-chat-server), so the rows look as if the
+server wrote them. Because it bypasses the server, it does not publish the server's realtime
+events or room system messages: open clients see changes on their next refresh. The server
+checks session revocation and account status on every request, so suspensions and sign-outs
+take effect immediately. Other rules it keeps:
+
+- The super user (`GANG`, UID 66666666) is read only here; the server resets it on every start.
+- A room's owner keeps that role until another member is made owner, which turns the old owner
+  into an admin. The owner can't be removed from the room.
+- Blacklisted users can't be added to that room.
+- Delete refuses to run until the database has the server's message-retention schema (message
+  sender snapshots, no cascading message foreign key), so it can never erase message history.
+  The server applies that schema when it starts.
+- Creating an account needs the server's `id_sequences` table, which the server creates.
+
+The MySQL user only needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the Gang Chat database.
 
 GitHub release sync is optional. When configured, the S3 panel can list release versions from the repository and sync the selected release assets into the configured object prefix:
 
@@ -167,5 +193,4 @@ not switch them to Google Fonts, which is unreliable in mainland China. The bran
 
 - Do not expose the API without TLS.
 - Use a unique 32+ byte `secretKey` per deployment.
-- Pin SSH host keys with `hostKeySha256` for production SSH presets.
 - MySQL and S3 writes require the preset write flags plus existing destructive confirmations.

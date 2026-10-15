@@ -7,7 +7,7 @@ const baseConnectionSchema = z.object({
 });
 
 export const connectionTypeQuerySchema = z.object({
-	type: z.enum(['mysql', 's3', 'ssh']).optional()
+	type: z.enum(['mysql', 's3']).optional()
 });
 
 export const connectionInputSchema = z.discriminatedUnion('type', [
@@ -34,18 +34,6 @@ export const connectionInputSchema = z.discriminatedUnion('type', [
 			accessKeyId: optionalString,
 			secretAccessKey: optionalString,
 			sessionToken: optionalString
-		})
-	}),
-	baseConnectionSchema.extend({
-		type: z.literal('ssh'),
-		config: z.object({
-			host: z.string().trim().min(1).max(255),
-			port: z.coerce.number().int().min(1).max(65535).default(22),
-			username: z.string().trim().min(1).max(128),
-			hostKeySha256: optionalString,
-			password: optionalString,
-			privateKey: optionalString,
-			passphrase: optionalString
 		})
 	})
 ]);

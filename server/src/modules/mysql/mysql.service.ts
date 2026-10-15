@@ -1,4 +1,9 @@
-import mysql, { type PoolOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
+import mysql, {
+	type Pool,
+	type PoolOptions,
+	type ResultSetHeader,
+	type RowDataPacket
+} from 'mysql2/promise';
 import type {
 	MysqlColumn,
 	MysqlPublicConfig,
@@ -186,6 +191,16 @@ export class MysqlService {
 		}
 	}
 
+	/** Runs `fn` with a short-lived pool for the preset, closing it afterwards. */
+	async withPool<T>(connectionId: string, fn: (pool: Pool) => Promise<T>) {
+		const pool = await this.pool(connectionId);
+		try {
+			return await fn(pool);
+		} finally {
+			await pool.end();
+		}
+	}
+
 	private async pool(connectionId: string) {
 		const preset = await this.connections.getWithSecrets(connectionId);
 		if (preset.type !== 'mysql') {
@@ -209,7 +224,7 @@ export class MysqlService {
 		return mysql.createPool(options);
 	}
 
-	private async assertMutationsAllowed(connectionId: string) {
+	async assertMutationsAllowed(connectionId: string) {
 		const preset = await this.connections.get(connectionId);
 		if (preset.type !== 'mysql') {
 			throw new HttpError(400, 'WRONG_CONNECTION_TYPE', 'Connection preset is not MySQL');

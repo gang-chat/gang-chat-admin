@@ -15,11 +15,6 @@ test('loadConfig reads explicit config file', async () => {
 			assert.equal(config.bootstrapAdminUser, 'admin');
 			assert.equal(config.bootstrapAdminPassword, 'test-admin-password');
 			assert.equal(config.basePath, '/admin');
-			assert.deepEqual(config.aiAdminWorker, {
-				baseUrl: 'https://llm.example.com/v1',
-				apiKey: 'test-ai-key',
-				model: 'ops-model'
-			});
 			assert.deepEqual(config.releaseSync, {
 				repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
 				owner: 'LoganZ2',
@@ -28,7 +23,6 @@ test('loadConfig reads explicit config file', async () => {
 				assetPrefix: 'GangChat',
 				githubToken: undefined
 			});
-			assert.equal(config.connections.ssh.length, 0);
 		});
 	} finally {
 		await rm(dir, { recursive: true, force: true });
@@ -51,7 +45,31 @@ test('loadConfig applies defaults for operational settings', async () => {
 			assert.equal(config.releaseSync, null);
 			assert.equal(config.connections.mysql, null);
 			assert.equal(config.connections.s3, null);
-			assert.deepEqual(config.connections.ssh, []);
+		});
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test('loadConfig ignores settings of the removed AI worker and SSH terminal', async () => {
+	const dir = await mkdtemp(path.join(os.tmpdir(), 'gang-ops-config-'));
+	try {
+		const configPath = path.join(dir, 'config.json');
+		const config = {
+			...minimalConfig(),
+			agentWorkerToken: 'old-agent-worker-token',
+			aiAdminWorker: { baseUrl: 'https://llm.example.com/v1', apiKey: 'old', model: 'old' },
+			sshMaxSessions: 2,
+			connections: {
+				ssh: [{ id: 'pi-1', type: 'ssh', name: 'Pi 1', config: { host: '10.0.0.2' } }]
+			}
+		};
+		await writeFile(configPath, JSON.stringify(config, null, 2), 'utf8');
+		await withArgv(['node', 'test', '--config', configPath], async () => {
+			const loaded = await loadConfig();
+			assert.deepEqual(loaded.connections, { mysql: null, s3: null });
+			assert.equal('agentWorkerToken' in loaded, false);
+			assert.equal('aiAdminWorker' in loaded, false);
 		});
 	} finally {
 		await rm(dir, { recursive: true, force: true });
@@ -110,7 +128,6 @@ function baseConfig() {
 		basePath: '/admin',
 		corsOrigin: ['http://localhost:8787'],
 		dataDir: './data',
-		agentWorkerToken: 'test-agent-worker-token',
 		secretKey: '12345678901234567890123456789012',
 		logLevel: 'info',
 		bodyLimitBytes: 1024,
@@ -118,42 +135,25 @@ function baseConfig() {
 		rateLimitMax: 10,
 		rateLimitWindow: '1 minute',
 		trustProxy: false,
-		sshMaxSessions: 2,
-		sshIdleTimeoutMs: 1000,
-		sshReadyTimeoutMs: 1000,
-		sshKeepaliveIntervalMs: 1000,
-		sshTicketTtlMs: 1000,
-		sshRequireHostKeyVerification: false,
 		sessionTtlMs: 1000,
 		sessionIdleTimeoutMs: 1000,
 		adminUsername: 'admin',
 		adminPassword: 'test-admin-password',
 		authMaxFailedLogins: 5,
 		authLockoutMs: 1000,
-		aiAdminWorker: {
-			baseUrl: 'https://llm.example.com/v1/',
-			apiKey: 'test-ai-key',
-			model: 'ops-model'
-		},
 		releaseSync: {
 			repositoryUrl: 'https://github.com/LoganZ2/gang-chat-admin',
 			targetPrefix: 'releases/current',
 			assetPrefix: 'GangChat'
 		},
-		connections: { mysql: null, s3: null, ssh: [] }
+		connections: { mysql: null, s3: null }
 	};
 }
 
 function minimalConfig() {
 	return {
-		agentWorkerToken: 'test-agent-worker-token',
 		secretKey: '12345678901234567890123456789012',
 		adminUsername: 'admin',
-		adminPassword: 'test-admin-password',
-		aiAdminWorker: {
-			baseUrl: 'https://llm.example.com/v1/',
-			apiKey: 'test-ai-key',
-			model: 'ops-model'
-		}
+		adminPassword: 'test-admin-password'
 	};
 }

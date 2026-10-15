@@ -7,7 +7,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn-svelte/tailwind.css';
-@import '@xterm/xterm/css/xterm.css';
 
 @custom-variant dark (&:is(.dark *));
 @plugin '@tailwindcss/forms';
@@ -440,11 +439,6 @@
 	.floating-wheel {
 		flex-direction: row;
 	}
-}
-
-.xterm {
-	height: 100%;
-	padding: 10px 12px;
 }
 
 @media (prefers-reduced-motion: reduce) {

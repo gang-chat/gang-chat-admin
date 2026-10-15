@@ -9,7 +9,6 @@ export type ServerConfig = {
 	basePath: string;
 	corsOrigin: string[];
 	dataDir: string;
-	agentWorkerToken: string;
 	secretKey: Buffer;
 	nodeEnv: string;
 	logLevel: string;
@@ -18,27 +17,14 @@ export type ServerConfig = {
 	rateLimitMax: number;
 	rateLimitWindow: string;
 	trustProxy: boolean;
-	sshMaxSessions: number;
-	sshIdleTimeoutMs: number;
-	sshReadyTimeoutMs: number;
-	sshKeepaliveIntervalMs: number;
-	sshTicketTtlMs: number;
-	sshRequireHostKeyVerification: boolean;
 	sessionTtlMs: number;
 	sessionIdleTimeoutMs: number;
 	bootstrapAdminUser: string;
 	bootstrapAdminPassword: string;
 	authMaxFailedLogins: number;
 	authLockoutMs: number;
-	aiAdminWorker: AiAdminWorkerConfig;
 	releaseSync: ReleaseSyncConfig | null;
 	connections: ConfigConnections;
-};
-
-export type AiAdminWorkerConfig = {
-	baseUrl: string;
-	apiKey: string;
-	model: string;
 };
 
 export type ReleaseSyncConfig = {
@@ -56,7 +42,6 @@ export type ConfigS3ConnectionInput = S3ConnectionInput & { id?: string };
 export type ConfigConnections = {
 	mysql: ConfigConnectionInput | null;
 	s3: ConfigS3ConnectionInput | null;
-	ssh: ConfigConnectionInput[];
 };
 
 type RawConfig = {
@@ -66,7 +51,6 @@ type RawConfig = {
 	basePath?: string;
 	corsOrigin?: string[];
 	dataDir?: string;
-	agentWorkerToken?: string;
 	secretKey?: string;
 	logLevel?: string;
 	bodyLimitBytes?: number;
@@ -74,19 +58,12 @@ type RawConfig = {
 	rateLimitMax?: number;
 	rateLimitWindow?: string;
 	trustProxy?: boolean;
-	sshMaxSessions?: number;
-	sshIdleTimeoutMs?: number;
-	sshReadyTimeoutMs?: number;
-	sshKeepaliveIntervalMs?: number;
-	sshTicketTtlMs?: number;
-	sshRequireHostKeyVerification?: boolean;
 	sessionTtlMs?: number;
 	sessionIdleTimeoutMs?: number;
 	adminUsername?: string;
 	adminPassword?: string;
 	authMaxFailedLogins?: number;
 	authLockoutMs?: number;
-	aiAdminWorker?: Partial<AiAdminWorkerConfig>;
 	releaseSync?: {
 		repositoryUrl?: string;
 		targetPrefix?: string;
@@ -109,12 +86,6 @@ const DEFAULT_CONFIG = {
 	rateLimitMax: 600,
 	rateLimitWindow: '1 minute',
 	trustProxy: false,
-	sshMaxSessions: 8,
-	sshIdleTimeoutMs: 10 * 60 * 1000,
-	sshReadyTimeoutMs: 20 * 1000,
-	sshKeepaliveIntervalMs: 15 * 1000,
-	sshTicketTtlMs: 30 * 1000,
-	sshRequireHostKeyVerification: false,
 	sessionTtlMs: 30 * 24 * 60 * 60 * 1000,
 	sessionIdleTimeoutMs: 24 * 60 * 60 * 1000,
 	authMaxFailedLogins: 8,
@@ -156,7 +127,6 @@ export async function loadConfig(): Promise<ServerConfig> {
 		basePath: normalizeBasePath(raw.basePath ?? DEFAULT_CONFIG.basePath),
 		corsOrigin,
 		dataDir,
-		agentWorkerToken: requiredString(raw.agentWorkerToken, 'agentWorkerToken'),
 		secretKey: loadSecretKey(requiredString(raw.secretKey, 'secretKey')),
 		nodeEnv,
 		logLevel: raw.logLevel?.trim() || DEFAULT_CONFIG.logLevel,
@@ -171,28 +141,6 @@ export async function loadConfig(): Promise<ServerConfig> {
 		rateLimitMax: positiveNumber(raw.rateLimitMax ?? DEFAULT_CONFIG.rateLimitMax, 'rateLimitMax'),
 		rateLimitWindow: raw.rateLimitWindow?.trim() || DEFAULT_CONFIG.rateLimitWindow,
 		trustProxy: raw.trustProxy ?? DEFAULT_CONFIG.trustProxy,
-		sshMaxSessions: positiveNumber(
-			raw.sshMaxSessions ?? DEFAULT_CONFIG.sshMaxSessions,
-			'sshMaxSessions'
-		),
-		sshIdleTimeoutMs: positiveNumber(
-			raw.sshIdleTimeoutMs ?? DEFAULT_CONFIG.sshIdleTimeoutMs,
-			'sshIdleTimeoutMs'
-		),
-		sshReadyTimeoutMs: positiveNumber(
-			raw.sshReadyTimeoutMs ?? DEFAULT_CONFIG.sshReadyTimeoutMs,
-			'sshReadyTimeoutMs'
-		),
-		sshKeepaliveIntervalMs: positiveNumber(
-			raw.sshKeepaliveIntervalMs ?? DEFAULT_CONFIG.sshKeepaliveIntervalMs,
-			'sshKeepaliveIntervalMs'
-		),
-		sshTicketTtlMs: positiveNumber(
-			raw.sshTicketTtlMs ?? DEFAULT_CONFIG.sshTicketTtlMs,
-			'sshTicketTtlMs'
-		),
-		sshRequireHostKeyVerification:
-			raw.sshRequireHostKeyVerification ?? DEFAULT_CONFIG.sshRequireHostKeyVerification,
 		sessionTtlMs: positiveNumber(raw.sessionTtlMs ?? DEFAULT_CONFIG.sessionTtlMs, 'sessionTtlMs'),
 		sessionIdleTimeoutMs: positiveNumber(
 			raw.sessionIdleTimeoutMs ?? DEFAULT_CONFIG.sessionIdleTimeoutMs,
@@ -208,18 +156,8 @@ export async function loadConfig(): Promise<ServerConfig> {
 			raw.authLockoutMs ?? DEFAULT_CONFIG.authLockoutMs,
 			'authLockoutMs'
 		),
-		aiAdminWorker: normalizeAiAdminWorker(raw.aiAdminWorker),
 		releaseSync: normalizeReleaseSync(raw.releaseSync),
 		connections: normalizeConnections(raw.connections)
-	};
-}
-
-function normalizeAiAdminWorker(input: RawConfig['aiAdminWorker']): AiAdminWorkerConfig {
-	if (!input) throw new Error('aiAdminWorker is required in config.json');
-	return {
-		baseUrl: requiredString(input.baseUrl, 'aiAdminWorker.baseUrl').replace(/\/$/, ''),
-		apiKey: requiredString(input.apiKey, 'aiAdminWorker.apiKey'),
-		model: requiredString(input.model, 'aiAdminWorker.model')
 	};
 }
 
@@ -248,8 +186,7 @@ function normalizeReleaseSync(input: RawConfig['releaseSync']): ReleaseSyncConfi
 function normalizeConnections(input: Partial<ConfigConnections> | undefined): ConfigConnections {
 	return {
 		mysql: assertSingleConnectionType(input?.mysql ?? null, 'mysql'),
-		s3: assertSingleS3Connection(input?.s3 ?? null),
-		ssh: assertConnectionTypes(input?.ssh ?? [], 'ssh')
+		s3: assertSingleS3Connection(input?.s3 ?? null)
 	};
 }
 
@@ -268,17 +205,6 @@ function assertSingleS3Connection(item: ConfigS3ConnectionInput | null) {
 	if (item.type !== 's3') throw new Error(`connections.s3 contains ${item.type} item`);
 	if (!item.name?.trim()) throw new Error('connections.s3 item must have a name');
 	return item;
-}
-
-function assertConnectionTypes<T extends ConfigConnectionInput['type']>(
-	items: ConfigConnectionInput[],
-	type: T
-) {
-	for (const item of items) {
-		if (item.type !== type) throw new Error(`connections.${type} contains ${item.type} item`);
-		if (!item.name?.trim()) throw new Error(`connections.${type} contains item without name`);
-	}
-	return items;
 }
 
 function getConfigPath() {

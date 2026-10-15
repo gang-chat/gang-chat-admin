@@ -1,4 +1,4 @@
-export type ConnectionType = 'mysql' | 's3' | 'ssh';
+export type ConnectionType = 'mysql' | 's3';
 
 export type ConnectionStatus = 'unknown' | 'healthy' | 'failed';
 
@@ -10,7 +10,7 @@ export type ConnectionPreset = {
 	status: ConnectionStatus;
 	lastCheckedAt?: string;
 	lastError?: string;
-	config: MysqlPublicConfig | S3PublicConfig | SshPublicConfig;
+	config: MysqlPublicConfig | S3PublicConfig;
 	createdAt: string;
 	updatedAt: string;
 };
@@ -56,44 +56,7 @@ export type S3ConnectionInput = {
 	config: S3PublicConfig & S3SecretConfig;
 };
 
-export type SshPublicConfig = {
-	host: string;
-	port: number;
-	username: string;
-	hostKeySha256?: string;
-};
-
-export type SshSecretConfig = {
-	password?: string;
-	privateKey?: string;
-	passphrase?: string;
-};
-
-export type SshConnectionInput = {
-	name: string;
-	tags?: string[];
-	type: 'ssh';
-	config: SshPublicConfig & SshSecretConfig;
-};
-
-export type SshSessionStatus = 'connecting' | 'connected' | 'closing';
-
-export type SshActiveSession = {
-	id: string;
-	connectionId: string;
-	connectionName?: string;
-	target: string;
-	host?: string;
-	port?: number;
-	username?: string;
-	startedAt: string;
-	lastActiveAt: string;
-	status: SshSessionStatus;
-	cols: number;
-	rows: number;
-};
-
-export type ConnectionInput = MysqlConnectionInput | S3ConnectionInput | SshConnectionInput;
+export type ConnectionInput = MysqlConnectionInput | S3ConnectionInput;
 
 export type MysqlColumn = {
 	field: string;
@@ -192,32 +155,64 @@ export type S3ReleaseSyncResult = {
 	uploaded: S3ReleaseSyncUploadedObject[];
 };
 
-export type ExpenseEntry = {
+export type GangAccountStatus = 'active' | 'suspended' | 'deleted';
+
+/** Room roles in the Gang Chat database; `owner` is the room creator. */
+export type GangRoomRole = 'owner' | 'admin' | 'member';
+
+export type GangAccount = {
 	id: string;
-	month: string;
-	category: string;
-	vendor: string;
-	amount: number;
-	currency: string;
-	note?: string;
+	uid: string;
+	username: string;
+	email: string;
+	displayName?: string;
+	status: GangAccountStatus;
+	isSuperuser: boolean;
+	emailVerified: boolean;
+	roomCount: number;
+	activeSessionCount: number;
+	lastSeenAt?: string;
 	createdAt: string;
 	updatedAt: string;
 };
 
-export type ExpenseInput = {
-	month: string;
-	category: string;
-	vendor: string;
-	amount: number;
-	currency: string;
-	note?: string;
+export type GangAccountMembership = {
+	roomId: string;
+	rid: string;
+	roomName: string;
+	role: GangRoomRole;
+	joinedAt: string;
 };
 
-export type ExpenseSummary = {
-	month: string;
+export type GangAccountDetail = GangAccount & {
+	memberships: GangAccountMembership[];
+};
+
+export type GangAccountList = {
 	total: number;
-	currency: string;
-	byCategory: Array<{ category: string; total: number }>;
+	items: GangAccount[];
+};
+
+export type GangRoomSummary = {
+	id: string;
+	rid: string;
+	name: string;
+	memberCount: number;
+};
+
+export type GangAccountCreateInput = {
+	username: string;
+	email: string;
+	password: string;
+	displayName?: string;
+};
+
+export type GangAccountUpdateInput = {
+	username?: string;
+	email?: string;
+	displayName?: string;
+	emailVerified?: boolean;
+	status?: 'active' | 'suspended';
 };
 
 export type AuditStatus = 'ok' | 'failed' | 'pending';
@@ -242,104 +237,6 @@ export type AuditIntegrity = {
 	headHash?: string;
 	brokenAt?: string;
 	reason?: string;
-};
-
-export type AgentCommand = {
-	label: string;
-	command: string;
-	requiresApproval: boolean;
-};
-
-export type AgentSuggestion = {
-	id: string;
-	createdAt: string;
-	goal: string;
-	summary: string;
-	risk: 'low' | 'medium' | 'high';
-	commands: AgentCommand[];
-	notes: string[];
-};
-
-export type AgentJobStatus = 'suggested' | 'approved' | 'rejected';
-
-export type AgentExecutionStatus = 'queued' | 'running' | 'completed' | 'failed';
-
-export type AgentWorkerTerminalStatus = {
-	available: boolean;
-	username?: string;
-	shell?: string;
-	cwd?: string;
-};
-
-export type AgentWorkerStatus = {
-	id: string;
-	lastSeenAt: string;
-	apiBase?: string;
-	hostname?: string;
-	version?: string;
-	execute: boolean;
-	allowedCommands: string[];
-	currentJobId?: string;
-	transport?: 'poll' | 'websocket';
-	connected?: boolean;
-	terminal?: AgentWorkerTerminalStatus;
-};
-
-export type AgentCommandResult = {
-	label?: string;
-	command: string;
-	exitCode: number | null;
-	stdout?: string;
-	stderr?: string;
-	startedAt?: string;
-	completedAt?: string;
-	durationMs?: number;
-};
-
-export type AgentJob = AgentSuggestion & {
-	status: AgentJobStatus;
-	executionStatus?: AgentExecutionStatus;
-	updatedAt: string;
-	approvedAt?: string;
-	rejectedAt?: string;
-	operatorNote?: string;
-	claimedAt?: string;
-	startedAt?: string;
-	completedAt?: string;
-	failedAt?: string;
-	workerId?: string;
-	result?: string;
-	error?: string;
-	commandResults?: AgentCommandResult[];
-};
-
-export type AgentRunEvent = {
-	type: 'status' | 'text' | 'tool' | 'compact' | 'done' | 'error';
-	message: string;
-	at: string;
-};
-
-export type AgentOpsSession = {
-	id: string;
-	workerId: string;
-	name: string;
-	titleSource?: 'auto' | 'custom';
-	createdAt: string;
-	updatedAt: string;
-	lastRunId?: string;
-};
-
-export type AgentOpsRun = {
-	id: string;
-	workerId: string;
-	sessionId: string;
-	createdAt: string;
-	updatedAt: string;
-	goal: string;
-	status: 'queued' | 'running' | 'completed' | 'failed';
-	result?: string;
-	error?: string;
-	events: AgentRunEvent[];
 };
 
 export type ApiEnvelope<T> = {
