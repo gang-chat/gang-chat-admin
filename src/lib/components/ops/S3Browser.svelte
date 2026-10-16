@@ -361,7 +361,8 @@
 								{#if releaseSyncConfig.assetPrefix}
 									<div class="mt-1 truncate font-mono text-[11px] text-faint">
 										{releaseSyncConfig.assetPrefix}_&lt;tag&gt;.dmg / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.exe
-										/ {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.apk / appcast.xml
+										(+ .blockmap) / {releaseSyncConfig.assetPrefix}_&lt;tag&gt;.apk / appcast.xml /
+										latest.yml
 									</div>
 								{/if}
 							</div>

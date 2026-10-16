@@ -116,13 +116,23 @@ GitHub release sync is optional. When configured, the S3 panel can list release 
 
 The sync clears the target prefix, then selects the first `.dmg`, `.exe`, and `.apk` asset from the
 release and stores them as `<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and
-`<assetPrefix>_<tag>.apk`.
+`<assetPrefix>_<tag>.apk`. If the release has a blockmap for that `.exe` (`<exe name>.blockmap`,
+from electron-builder), it is stored as `<assetPrefix>_<tag>.exe.blockmap`. Clearing keeps earlier
+`.blockmap` files: the Windows app's electron-updater downloads the installed version's blockmap
+next to the new one to fetch only the changed blocks.
 
-If the release also has an `appcast.xml` (the macOS client's Sparkle update feed), it is uploaded
-last under that fixed name, with `Content-Type: application/xml` and `Cache-Control: no-cache`.
-Before anything is cleared, the sync checks that every update in the appcast downloads the
-`.dmg` this sync uploads (`<targetPrefix><assetPrefix>_<tag>.dmg`); if not, it fails with
-`RELEASE_APPCAST_MISMATCH` and leaves the bucket unchanged.
+The update feeds are uploaded last under their fixed names, with `Cache-Control: no-cache`,
+because they point at the installers:
+
+- `appcast.xml`, the macOS client's Sparkle feed (`Content-Type: application/xml`). Before
+  anything is cleared, the sync checks that every update in it downloads the `.dmg` this sync
+  uploads (`<targetPrefix><assetPrefix>_<tag>.dmg`); if not, it fails with
+  `RELEASE_APPCAST_MISMATCH`.
+- `latest.yml`, the Windows client's electron-updater feed (`Content-Type: text/yaml`). Its
+  `path` and every `files` URL must be the `.exe` this sync uploads
+  (`<assetPrefix>_<tag>.exe`); if not, it fails with `RELEASE_LATEST_YML_MISMATCH`.
+
+A failed check leaves the bucket unchanged.
 
 If the admin app is mounted below a route prefix, configure it in `config.json`:
 

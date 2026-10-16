@@ -99,8 +99,10 @@ export class S3Service {
 		);
 		const assets = release.assets ?? [];
 		const selectedAssets = selectReleaseAssetsForSync(assets, config.assetPrefix, release.tag_name);
-		const installers = selectedAssets.filter((item) => item.outputName !== sparkleAppcastName);
+		const files = selectedAssets.filter((item) => !isUpdateFeedName(item.outputName));
+		const installers = files.filter((item) => !item.outputName.endsWith('.blockmap'));
 		const appcast = selectedAssets.find((item) => item.outputName === sparkleAppcastName);
+		const latestYml = selectedAssets.find((item) => item.outputName === electronUpdaterFeedName);
 		if (installers.length === 0) {
 			throw new HttpError(
 				400,
@@ -128,11 +130,29 @@ export class S3Service {
 			}
 		}
 
+		// The same for the Windows app's electron-updater feed, which names the
+		// installer to download relative to the feed.
+		let latestYmlBody: Buffer | undefined;
+		if (latestYml) {
+			const exe = installers.find((item) => item.outputName.toLowerCase().endsWith('.exe'));
+			const response = await this.githubFetch(latestYml.asset.url, {
+				accept: 'application/octet-stream'
+			});
+			latestYmlBody = Buffer.from(await response.arrayBuffer());
+			if (!exe || !latestYmlPointsAtFile(latestYmlBody.toString('utf8'), exe.outputName)) {
+				throw new HttpError(
+					400,
+					'RELEASE_LATEST_YML_MISMATCH',
+					`latest.yml must download ${exe?.outputName ?? 'an .exe from the same release'}`
+				);
+			}
+		}
+
 		const client = await this.client(connectionId);
 		const deleted = await this.clearPrefix(client, safeBucket, config.targetPrefix);
 		const uploaded: S3ReleaseSyncResult['uploaded'] = [];
 
-		for (const { asset, outputName } of installers) {
+		for (const { asset, outputName } of files) {
 			const key = `${config.targetPrefix}${outputName}`;
 			const response = await this.githubFetch(asset.url, {
 				accept: 'application/octet-stream'
@@ -167,30 +187,37 @@ export class S3Service {
 			});
 		}
 
-		if (appcast && appcastBody) {
-			const key = `${config.targetPrefix}${sparkleAppcastName}`;
+		// The update feeds go last: they point at the files above, which must
+		// already be in place when installed apps read them.
+		const feeds = [
+			{ item: appcast, body: appcastBody, contentType: 'application/xml' },
+			{ item: latestYml, body: latestYmlBody, contentType: 'text/yaml' }
+		];
+		for (const { item, body, contentType } of feeds) {
+			if (!item || !body) continue;
+			const key = `${config.targetPrefix}${item.outputName}`;
 			await new Upload({
 				client,
 				params: {
 					Bucket: safeBucket,
 					Key: key,
-					Body: appcastBody,
-					ContentType: 'application/xml',
-					// Installed apps must see a new appcast as soon as it lands.
+					Body: body,
+					ContentType: contentType,
+					// Installed apps must see a new feed as soon as it lands.
 					CacheControl: 'no-cache',
 					Metadata: {
 						'github-repository': `${config.owner}/${config.repo}`,
 						'github-release-tag': release.tag_name,
-						'github-asset-id': String(appcast.asset.id)
+						'github-asset-id': String(item.asset.id)
 					}
 				}
 			}).done();
 			uploaded.push({
-				name: sparkleAppcastName,
-				sourceName: appcast.asset.name,
+				name: item.outputName,
+				sourceName: item.asset.name,
 				key,
-				size: appcastBody.length,
-				contentType: 'application/xml'
+				size: body.length,
+				contentType
 			});
 		}
 
@@ -440,7 +467,7 @@ export class S3Service {
 				})
 			);
 			for (const object of result.Contents ?? []) {
-				if (object.Key) keys.push(object.Key);
+				if (object.Key && releaseKeyIsCleared(object.Key)) keys.push(object.Key);
 			}
 			continuationToken = result.NextContinuationToken;
 		} while (continuationToken);
@@ -503,16 +530,56 @@ export function selectReleaseAssetsForSync<T extends { name: string }>(
 		if (selectedExtensions.size === releaseAssetExtensions.length) break;
 	}
 
-	// The macOS app's Sparkle updater reads appcast.xml under its fixed name.
-	// It goes last because it points at the DMG, which must already be in
-	// place when installed apps see the new appcast.
-	const appcast = assets.find((asset) => asset.name.trim().toLowerCase() === sparkleAppcastName);
-	if (appcast) selected.push({ asset: appcast, outputName: sparkleAppcastName });
+	// electron-updater (the Windows app) fetches `<installer>.blockmap` next to
+	// the installer for differential downloads, so it follows the installer's
+	// synced name.
+	const exe = selected.find((item) => item.outputName.endsWith('.exe'));
+	if (exe) {
+		const blockmapName = `${exe.asset.name.trim().toLowerCase()}.blockmap`;
+		const blockmap = assets.find((asset) => asset.name.trim().toLowerCase() === blockmapName);
+		if (blockmap) selected.push({ asset: blockmap, outputName: `${exe.outputName}.blockmap` });
+	}
+
+	// The update feeds keep their fixed names: appcast.xml for the macOS app's
+	// Sparkle updater, latest.yml for the Windows app's electron-updater. They
+	// go last because they point at the installers, which must already be in
+	// place when installed apps see a new feed.
+	for (const feedName of [sparkleAppcastName, electronUpdaterFeedName]) {
+		const feed = assets.find((asset) => asset.name.trim().toLowerCase() === feedName);
+		if (feed) selected.push({ asset: feed, outputName: feedName });
+	}
 
 	return selected;
 }
 
 export const sparkleAppcastName = 'appcast.xml';
+export const electronUpdaterFeedName = 'latest.yml';
+
+function isUpdateFeedName(name: string) {
+	return name === sparkleAppcastName || name === electronUpdaterFeedName;
+}
+
+/**
+ * Whether a sync clears `key` before uploading a release. Blockmaps stay:
+ * electron-updater downloads the installed version's blockmap next to the
+ * new one to fetch only the changed blocks, so the previous releases' ones
+ * must outlive their installers. They are a few hundred KB each.
+ */
+export function releaseKeyIsCleared(key: string) {
+	return !key.toLowerCase().endsWith('.blockmap');
+}
+
+/**
+ * Whether an electron-updater latest.yml downloads only `fileName`, which is
+ * resolved next to the feed, so a synced feed never offers an installer that
+ * the same sync didn't upload.
+ */
+export function latestYmlPointsAtFile(latestYml: string, fileName: string) {
+	const names = [...latestYml.matchAll(/^\s*(?:-\s*)?(?:url|path):\s*(.+?)\s*$/gm)].map((match) =>
+		match[1].replace(/^(['"])(.*)\1$/, '$2')
+	);
+	return names.length > 0 && names.every((name) => name === fileName);
+}
 
 /**
  * Whether every update in a Sparkle appcast downloads from `key`, so a synced

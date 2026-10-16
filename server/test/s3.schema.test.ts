@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
 	isS3NotFoundError,
 	appcastPointsAtKey,
+	latestYmlPointsAtFile,
+	releaseKeyIsCleared,
 	selectReleaseAssetsForSync,
 	validateBucketName,
 	validateObjectKey
@@ -144,6 +146,82 @@ test('S3 release sync uploads the Sparkle appcast last under its fixed name', ()
 		selected.map((item) => item.outputName),
 		['GangChat_v1.2.3.dmg', 'GangChat_v1.2.3.exe', 'GangChat_v1.2.3.apk', 'appcast.xml']
 	);
+});
+
+test('S3 release sync publishes the Electron update feeds after the installers', () => {
+	const selected = selectReleaseAssetsForSync(
+		[
+			{ name: 'appcast.xml' },
+			{ name: 'GangChat-1.2.3-windows.zip' },
+			{ name: 'GangChat_v1.2.3.apk' },
+			{ name: 'GangChat_v1.2.3.dmg' },
+			{ name: 'GangChat_v1.2.3.exe' },
+			{ name: 'GangChat_v1.2.3.exe.blockmap' },
+			{ name: 'latest.yml' }
+		],
+		'GangChat',
+		'v1.2.3'
+	);
+
+	assert.deepEqual(
+		selected.map((item) => ({ source: item.asset.name, output: item.outputName })),
+		[
+			{ source: 'GangChat_v1.2.3.apk', output: 'GangChat_v1.2.3.apk' },
+			{ source: 'GangChat_v1.2.3.dmg', output: 'GangChat_v1.2.3.dmg' },
+			{ source: 'GangChat_v1.2.3.exe', output: 'GangChat_v1.2.3.exe' },
+			{ source: 'GangChat_v1.2.3.exe.blockmap', output: 'GangChat_v1.2.3.exe.blockmap' },
+			{ source: 'appcast.xml', output: 'appcast.xml' },
+			{ source: 'latest.yml', output: 'latest.yml' }
+		]
+	);
+});
+
+test('S3 release sync renames the blockmap with its installer', () => {
+	const selected = selectReleaseAssetsForSync(
+		[{ name: 'Setup.exe' }, { name: 'Other.exe.blockmap' }, { name: 'setup.exe.blockmap' }],
+		'GangChat',
+		'v1.2.3'
+	);
+
+	assert.deepEqual(
+		selected.map((item) => ({ source: item.asset.name, output: item.outputName })),
+		[
+			{ source: 'Setup.exe', output: 'GangChat_v1.2.3.exe' },
+			{ source: 'setup.exe.blockmap', output: 'GangChat_v1.2.3.exe.blockmap' }
+		]
+	);
+});
+
+test('latest.yml check requires every file to be the synced installer', () => {
+	const latestYml = (name: string) => `version: 1.2.3
+files:
+  - url: ${name}
+    sha512: abc==
+    size: 101713257
+path: ${name}
+sha512: abc==
+releaseDate: '2026-10-16T19:21:39.078Z'
+`;
+
+	assert.equal(
+		latestYmlPointsAtFile(latestYml('GangChat_v1.2.3.exe'), 'GangChat_v1.2.3.exe'),
+		true
+	);
+	assert.equal(
+		latestYmlPointsAtFile(latestYml("'GangChat_v1.2.3.exe'"), 'GangChat_v1.2.3.exe'),
+		true
+	);
+	assert.equal(
+		latestYmlPointsAtFile(latestYml('GangChat_v1.2.2.exe'), 'GangChat_v1.2.3.exe'),
+		false
+	);
+	assert.equal(latestYmlPointsAtFile('version: 1.2.3\n', 'GangChat_v1.2.3.exe'), false);
+});
+
+test('S3 release sync keeps earlier blockmaps for differential updates', () => {
+	assert.equal(releaseKeyIsCleared('releases/GangChat_v1.2.2.exe'), true);
+	assert.equal(releaseKeyIsCleared('releases/latest.yml'), true);
+	assert.equal(releaseKeyIsCleared('releases/GangChat_v1.2.2.exe.blockmap'), false);
 });
 
 test('Sparkle appcast check requires every enclosure to download the synced DMG', () => {
