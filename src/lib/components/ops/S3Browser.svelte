@@ -257,11 +257,10 @@
 	{#if !bucket}
 		<Card.Root>
 			<Card.Content class="text-sm text-muted-foreground">
-				<div class="font-medium text-foreground">S3 file manager unavailable</div>
+				<div class="font-medium text-foreground">File manager unavailable</div>
 				<div class="mt-1">
-					Set <code class="font-mono text-[13px] text-foreground">s3_endpoint</code>,
-					<code class="font-mono text-[13px] text-foreground">s3_bucket</code> and the S3 keys in the
-					server's config.json and restart it.
+					Set <code class="font-mono text-[13px] text-foreground">storage_path</code> in the server's
+					config.json and restart it.
 				</div>
 			</Card.Content>
 		</Card.Root>
@@ -277,7 +276,7 @@
 					</div>
 					<div class="flex flex-wrap items-center gap-2">
 						<Select.Root type="single" bind:value={maxKeysValue} onValueChange={updateMaxKeys}>
-							<Select.Trigger aria-label="S3 page size" size="sm" class="w-[120px]"
+							<Select.Trigger aria-label="Page size" size="sm" class="w-[120px]"
 								>{maxKeys} keys</Select.Trigger
 							>
 							<Select.Content>
@@ -303,6 +302,9 @@
 								<div class="eyebrow">Release sync</div>
 								<div class="mt-2 truncate font-mono text-[12px] text-muted-foreground">
 									{releaseSyncConfig.repository} -> {bucket}/{releaseSyncConfig.targetPrefix}
+								</div>
+								<div class="mt-1 text-[12px] text-muted-foreground">
+									New releases sync on their own once the release workflow succeeds.
 								</div>
 								{#if releaseSyncConfig.assetPrefix}
 									<div class="mt-1 truncate font-mono text-[11px] text-faint">

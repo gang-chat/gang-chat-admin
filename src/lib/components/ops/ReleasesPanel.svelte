@@ -364,7 +364,7 @@
 						>
 							<div class="eyebrow text-destructive">Confirm delete</div>
 							<p class="mt-2">
-								Removes {saved.version} from the homepage. The files in the bucket stay.
+								Removes {saved.version} from the homepage. Its files on the server stay.
 							</p>
 							<Input
 								class="mt-3"

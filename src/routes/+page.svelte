@@ -267,7 +267,7 @@
 				</section>
 
 				<section id="files" class="scroll-mt-6">
-					{@render sectionHeading('02', 'S3 files')}
+					{@render sectionHeading('02', 'Files')}
 					<S3Browser
 						{api}
 						storage={overview.storage}

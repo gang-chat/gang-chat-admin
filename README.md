@@ -2,13 +2,14 @@
 
 The operations console for Gang Chat: a static SvelteKit page that talks to the gang-chat
 server's admin API (`/api/v1/admin/*`, in gang-chat-server `internal/admin`). There is no
-backend here any more; the Go server holds the database, the S3 keys and the console's sign-in.
+backend here any more; the Go server holds the database, the files and the console's sign-in.
 
 ## What Is Included
 
 - Releases: the client versions the homepage shows, with their notes,
   release date, minimum supported version, download links and whether they are published.
-- S3 file manager for the server's bucket: upload, download, delete, and GitHub release sync.
+- A file manager for the server's storage directory (`storage_path`): upload, download, delete,
+  and GitHub release sync.
 - Gang Chat account admin: accounts, sign-in access, and room membership and roles.
 - A read-only view of the server's SQLite database.
 
@@ -25,10 +26,9 @@ The console's settings live in the gang-chat server's `config.json`:
 	"admin_password": "at least 14 characters with lower, upper, digit and symbol",
 
 	"release_sync_repository_url": "https://github.com/gang-chat/gang-chat-client",
-	"release_sync_target_prefix": "releases",
 	"release_sync_asset_prefix": "GangChat",
 	"release_sync_github_token": "optional, for private repos or a higher rate limit",
-	"release_download_base_url": "optional; defaults to <s3_endpoint>/<s3_bucket>"
+	"release_download_base_url": "https://ky-z.com/gang-chat/assets/releases"
 }
 ```
 
@@ -38,18 +38,20 @@ The console stays off (the API answers `503 ADMIN_DISABLED`) until `admin_userna
 the username or common words such as `password` or `admin`. Eight wrong passwords lock sign-in
 for 15 minutes. Sessions last 30 days, or until they go unused for a day.
 
-The S3 panel uses the server's own `s3_endpoint`, `s3_bucket` and keys.
+The file manager shows the server's `storage_path`: chat uploads under `assets/<asset id>/`, the
+synced client release under `assets/releases/`.
 
 ## Releases
 
 Each version has a title, notes, a release date, a published flag, a minimum supported version
 and Windows, macOS and Android download links. The newest published version is the version and download buttons on the homepage, which reads
 `GET /api/v1/releases`. `GET /api/v1/app/version` reports it too, with its minimum supported
-version (empty means the version itself); current clients check for updates against the bucket's
-`appcast.xml` and `latest.yml` instead, so the minimum is not enforced anywhere yet.
+version (empty means the version itself); current clients check for updates against the
+`appcast.xml` and `latest.yml` that release sync puts next to the installers instead, so the
+minimum is not enforced anywhere yet.
 
 Every published version with notes shows on the homepage as an announcement. Drafts are hidden
-from both. Deleting a version removes its row only; files in the bucket stay.
+from both. Deleting a version removes its row only; its files on the server stay.
 
 ## Account Admin
 
@@ -81,31 +83,41 @@ so suspensions and sign-outs take effect immediately. Other rules it keeps:
 
 ## Release Sync
 
-When `release_sync_repository_url` is set, the S3 panel lists the repository's GitHub releases
-and syncs one into `release_sync_target_prefix`.
+When `release_sync_repository_url` is set, the server copies the repository's GitHub releases
+into `assets/releases/` under its `storage_path` and serves them at `/assets/releases/<file>`
+(`https://ky-z.com/gang-chat/assets/releases/`), with range requests, so downloads resume and
+electron-updater can fetch only the changed blocks.
 
-The sync clears the target prefix, then selects the first `.dmg`, `.exe`, and `.apk` asset from the
+New releases sync on their own: every five minutes the server checks the repository's latest
+release, and syncs it once the release workflow (`.github/workflows/release.yml`) run on its tag
+has succeeded. GitHub lists a release while that run is still uploading its files, so the server
+waits for the run. A rerun of a failed job counts. A tag synced once, from the console or on its
+own, is not synced on its own again, so a version deleted or rolled back here stays that way. The
+file manager can also sync any tag by hand; one sync runs at a time.
+
+The sync clears `assets/releases/`, then selects the first `.dmg`, `.exe`, and `.apk` asset from the
 release and stores them as `<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and
 `<assetPrefix>_<tag>.apk`. If the release has a blockmap for that `.exe` (`<exe name>.blockmap`,
 from electron-builder), it is stored as `<assetPrefix>_<tag>.exe.blockmap`. Clearing keeps earlier
 `.blockmap` files: the Windows app's electron-updater downloads the installed version's blockmap
 next to the new one to fetch only the changed blocks.
 
-The update feeds are uploaded last under their fixed names, with `Cache-Control: no-cache`,
-because they point at the installers:
+The update feeds are stored last under their fixed names, and served with
+`Cache-Control: no-cache`, because they point at the installers:
 
 - `appcast.xml`, the macOS client's Sparkle feed (`Content-Type: application/xml`). Before
   anything is cleared, the sync checks that every update in it downloads the `.dmg` this sync
-  uploads (`<targetPrefix><assetPrefix>_<tag>.dmg`); if not, it fails with
-  `RELEASE_APPCAST_MISMATCH`.
+  stores, from `release_download_base_url` (`<base>/<assetPrefix>_<tag>.dmg`); if not, it fails
+  with `RELEASE_APPCAST_MISMATCH`.
 - `latest.yml`, the Windows client's electron-updater feed (`Content-Type: text/yaml`). Its
-  `path` and every `files` URL must be the `.exe` this sync uploads
+  `path` and every `files` URL must be the `.exe` this sync stores
   (`<assetPrefix>_<tag>.exe`); if not, it fails with `RELEASE_LATEST_YML_MISMATCH`.
 
-A failed check leaves the bucket unchanged. All assets are downloaded before anything in the
-bucket is cleared, so a GitHub failure also leaves it as it was.
+A failed check leaves the stored release unchanged. All assets are downloaded before anything
+is cleared, so a GitHub failure also leaves it as it was.
 
-After a sync, the version's release row points at the uploaded installers. A version the console
+After a sync, the version's release row points at the stored installers, under
+`release_download_base_url`. A version the console
 has never seen is created published, titled `Gang Chat <version>` and dated from GitHub's
 publish time (Beijing time); an existing one keeps its notes and visibility. Links on other
 versions to installers the sync removed are cleared.
