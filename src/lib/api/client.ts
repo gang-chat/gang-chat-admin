@@ -1,24 +1,20 @@
 import type {
+	AdminLoginResult,
+	AdminOverview,
+	AdminSession,
 	ApiEnvelope,
-	AuthLoginResult,
-	AuthRole,
-	AuthUser,
-	ConnectionInput,
-	ConnectionPreset,
-	ConnectionType,
+	AppRelease,
+	AppReleaseInput,
+	DbColumn,
+	DbTableSummary,
 	GangAccountCreateInput,
 	GangAccountDetail,
 	GangAccountList,
 	GangAccountUpdateInput,
 	GangRoomRole,
 	GangRoomSummary,
-	MysqlColumn,
-	MysqlQueryResult,
-	MysqlSqlPolicy,
-	MysqlTableSummary,
 	S3ObjectList,
 	S3ObjectMetadata,
-	S3ReleaseSyncConfig,
 	S3ReleaseSyncResult,
 	S3ReleaseVersion
 } from '$lib/shared/ops-types';
@@ -35,20 +31,22 @@ export class ApiClientError extends Error {
 	}
 }
 
+/** The Go server's API root, as the browser reaches it through nginx. */
+export const defaultApiBase = import.meta.env.VITE_API_BASE || '/gang-chat/api/v1';
+
 export class ApiClient {
 	constructor(
 		private readonly baseUrl: string,
-		private readonly token: string,
-		private readonly actor = ''
+		private readonly token: string
 	) {}
 
-	async health() {
-		return this.get<{ status: string; at: string; mode: string }>('/api/health', false);
+	async status() {
+		return this.get<{ enabled: boolean }>('/admin/status', false);
 	}
 
 	async login(username: string, password: string) {
-		return this.request<AuthLoginResult>(
-			'/api/auth/login',
+		return this.request<AdminLoginResult>(
+			'/admin/login',
 			{
 				method: 'POST',
 				body: JSON.stringify({ username, password })
@@ -58,151 +56,95 @@ export class ApiClient {
 	}
 
 	async me() {
-		return this.get<{
-			user: AuthUser;
-			expiresAt: string;
-			idleExpiresAt: string;
-			authMethod: 'session';
-		}>('/api/auth/me');
+		return this.get<AdminSession>('/admin/me');
 	}
 
 	async logout() {
-		return this.request<{ revoked: boolean }>('/api/auth/logout', { method: 'POST' });
+		return this.request<{ revoked: boolean }>('/admin/logout', { method: 'POST' });
 	}
 
-	async connections(type?: ConnectionType) {
-		return this.get<ConnectionPreset[]>(`/api/connections${type ? `?type=${type}` : ''}`);
+	async overview() {
+		return this.get<AdminOverview>('/admin/overview');
 	}
 
-	async createConnection(input: ConnectionInput) {
-		return this.request<ConnectionPreset>('/api/connections', {
-			method: 'POST',
-			body: JSON.stringify(input)
-		});
+	async dbTables() {
+		return this.get<DbTableSummary[]>('/admin/db/tables');
 	}
 
-	async updateConnection(id: string, input: ConnectionInput) {
-		return this.request<ConnectionPreset>(`/api/connections/${id}`, {
-			method: 'PUT',
-			body: JSON.stringify(input)
-		});
+	async dbSchema(table: string) {
+		return this.get<DbColumn[]>(`/admin/db/tables/${encodeURIComponent(table)}/schema`);
 	}
 
-	async testConnection(id: string) {
-		return this.request<{ status: string }>(`/api/connections/${id}/test`, { method: 'POST' });
-	}
-
-	async deleteConnection(id: string, confirmation: string) {
-		await this.raw(`/api/connections/${id}`, {
-			method: 'DELETE',
-			headers: { 'x-ops-confirmation': confirmation }
-		});
-	}
-
-	async mysqlTables(id: string) {
-		return this.get<MysqlTableSummary[]>(`/api/mysql/${id}/tables`);
-	}
-
-	async mysqlSchema(id: string, table: string) {
-		return this.get<MysqlColumn[]>(`/api/mysql/${id}/tables/${encodeURIComponent(table)}/schema`);
-	}
-
-	async mysqlRows(id: string, table: string, limit = 100, offset = 0) {
+	async dbRows(table: string, limit = 100, offset = 0) {
 		return this.get<Record<string, unknown>[]>(
-			`/api/mysql/${id}/tables/${encodeURIComponent(table)}/rows?limit=${limit}&offset=${offset}`
+			`/admin/db/tables/${encodeURIComponent(table)}/rows?limit=${limit}&offset=${offset}`
 		);
 	}
 
-	async mysqlInsert(id: string, table: string, row: Record<string, unknown>) {
-		return this.request<{ affectedRows: number; insertId?: number }>(
-			`/api/mysql/${id}/tables/${encodeURIComponent(table)}/rows`,
-			{ method: 'POST', body: JSON.stringify({ row }) }
-		);
-	}
-
-	async mysqlUpdate(
-		id: string,
-		table: string,
-		primaryKey: Record<string, unknown>,
-		patch: Record<string, unknown>
-	) {
-		return this.request<{ affectedRows: number }>(
-			`/api/mysql/${id}/tables/${encodeURIComponent(table)}/rows`,
-			{ method: 'PATCH', body: JSON.stringify({ primaryKey, patch }) }
-		);
-	}
-
-	async mysqlDelete(
-		id: string,
-		table: string,
-		primaryKey: Record<string, unknown>,
-		confirmation: string
-	) {
-		return this.request<{ affectedRows: number }>(
-			`/api/mysql/${id}/tables/${encodeURIComponent(table)}/rows`,
-			{ method: 'DELETE', body: JSON.stringify({ primaryKey, confirmation }) }
-		);
-	}
-
-	async mysqlQuery(id: string, sql: string, policy: MysqlSqlPolicy) {
-		return this.request<MysqlQueryResult>(`/api/mysql/${id}/query`, {
-			method: 'POST',
-			body: JSON.stringify({ sql, ...policy })
-		});
-	}
-
-	async s3Objects(
-		id: string,
-		bucket: string,
-		options: { prefix?: string; continuationToken?: string; maxKeys?: number } = {}
-	) {
+	async s3Objects(options: { prefix?: string; continuationToken?: string; maxKeys?: number } = {}) {
 		const params = new URLSearchParams();
-		params.set('bucket', bucket);
 		params.set('prefix', options.prefix ?? '');
 		params.set('maxKeys', String(options.maxKeys ?? 500));
 		if (options.continuationToken) params.set('continuationToken', options.continuationToken);
-		return this.get<S3ObjectList>(`/api/s3/${id}/objects?${params.toString()}`);
+		return this.get<S3ObjectList>(`/admin/storage/objects?${params.toString()}`);
 	}
 
-	async s3Upload(id: string, form: FormData) {
-		return this.request<{ bucket: string; key: string }>(`/api/s3/${id}/objects`, {
+	async s3Upload(form: FormData) {
+		return this.request<{ bucket: string; key: string }>('/admin/storage/objects', {
 			method: 'POST',
 			body: form,
 			json: false
 		});
 	}
 
-	async s3Head(id: string, bucket: string, key: string) {
-		return this.get<S3ObjectMetadata>(
-			`/api/s3/${id}/objects/head?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`
-		);
+	async s3Head(key: string) {
+		return this.get<S3ObjectMetadata>(`/admin/storage/objects/head?key=${encodeURIComponent(key)}`);
 	}
 
-	async s3Delete(id: string, bucket: string, key: string, confirmation: string) {
-		return this.request<{ deleted: boolean }>(`/api/s3/${id}/objects`, {
+	async s3Delete(key: string, confirmation: string) {
+		return this.request<{ deleted: boolean }>('/admin/storage/objects', {
 			method: 'DELETE',
-			body: JSON.stringify({ bucket, key, confirmation })
+			body: JSON.stringify({ key, confirmation })
 		});
 	}
 
-	async s3Download(id: string, bucket: string, key: string) {
-		return this.raw(
-			`/api/s3/${id}/objects/download?bucket=${encodeURIComponent(bucket)}&key=${encodeURIComponent(key)}`
-		);
+	async s3Download(key: string) {
+		return this.raw(`/admin/storage/objects/download?key=${encodeURIComponent(key)}`);
 	}
 
-	async s3ReleaseSyncConfig(id: string) {
-		return this.get<S3ReleaseSyncConfig>(`/api/s3/${id}/release-sync`);
+	async s3ReleaseVersions() {
+		return this.get<S3ReleaseVersion[]>('/admin/release-sync/releases');
 	}
 
-	async s3ReleaseVersions(id: string) {
-		return this.get<S3ReleaseVersion[]>(`/api/s3/${id}/release-sync/releases`);
-	}
-
-	async s3SyncRelease(id: string, bucket: string, tagName: string) {
-		return this.request<S3ReleaseSyncResult>(`/api/s3/${id}/release-sync`, {
+	async s3SyncRelease(tagName: string) {
+		return this.request<S3ReleaseSyncResult>('/admin/release-sync', {
 			method: 'POST',
-			body: JSON.stringify({ bucket, tagName })
+			body: JSON.stringify({ tagName })
+		});
+	}
+
+	async releases() {
+		return this.get<AppRelease[]>('/admin/releases');
+	}
+
+	async createRelease(input: AppReleaseInput & { version: string }) {
+		return this.request<AppRelease>('/admin/releases', {
+			method: 'POST',
+			body: JSON.stringify(input)
+		});
+	}
+
+	async updateRelease(version: string, patch: AppReleaseInput) {
+		return this.request<AppRelease>(`/admin/releases/${encodeURIComponent(version)}`, {
+			method: 'PATCH',
+			body: JSON.stringify(patch)
+		});
+	}
+
+	async deleteRelease(version: string, confirmation: string) {
+		return this.request<{ deleted: boolean }>(`/admin/releases/${encodeURIComponent(version)}`, {
+			method: 'DELETE',
+			headers: { 'x-ops-confirmation': confirmation }
 		});
 	}
 
@@ -212,26 +154,26 @@ export class ApiClient {
 		if (query.status) params.set('status', query.status);
 		params.set('limit', String(query.limit ?? 50));
 		params.set('offset', String(query.offset ?? 0));
-		return this.get<GangAccountList>(`/api/accounts?${params.toString()}`);
+		return this.get<GangAccountList>(`/admin/accounts?${params.toString()}`);
 	}
 
 	async account(id: string) {
-		return this.get<GangAccountDetail>(`/api/accounts/${encodeURIComponent(id)}`);
+		return this.get<GangAccountDetail>(`/admin/accounts/${encodeURIComponent(id)}`);
 	}
 
 	async accountRooms(q = '') {
-		return this.get<GangRoomSummary[]>(`/api/accounts/rooms?q=${encodeURIComponent(q)}`);
+		return this.get<GangRoomSummary[]>(`/admin/accounts/rooms?q=${encodeURIComponent(q)}`);
 	}
 
 	async createAccount(input: GangAccountCreateInput) {
-		return this.request<GangAccountDetail>('/api/accounts', {
+		return this.request<GangAccountDetail>('/admin/accounts', {
 			method: 'POST',
 			body: JSON.stringify(input)
 		});
 	}
 
 	async updateAccount(id: string, patch: GangAccountUpdateInput) {
-		return this.request<GangAccountDetail>(`/api/accounts/${encodeURIComponent(id)}`, {
+		return this.request<GangAccountDetail>(`/admin/accounts/${encodeURIComponent(id)}`, {
 			method: 'PATCH',
 			body: JSON.stringify(patch)
 		});
@@ -239,20 +181,20 @@ export class ApiClient {
 
 	async resetAccountPassword(id: string, password: string) {
 		return this.request<{ revokedSessions: number }>(
-			`/api/accounts/${encodeURIComponent(id)}/password`,
+			`/admin/accounts/${encodeURIComponent(id)}/password`,
 			{ method: 'POST', body: JSON.stringify({ password }) }
 		);
 	}
 
 	async revokeAccountSessions(id: string) {
 		return this.request<{ revokedSessions: number }>(
-			`/api/accounts/${encodeURIComponent(id)}/sessions/revoke`,
+			`/admin/accounts/${encodeURIComponent(id)}/sessions/revoke`,
 			{ method: 'POST' }
 		);
 	}
 
 	async deleteAccount(id: string, confirmation: string) {
-		return this.request<{ username: string }>(`/api/accounts/${encodeURIComponent(id)}`, {
+		return this.request<{ username: string }>(`/admin/accounts/${encodeURIComponent(id)}`, {
 			method: 'DELETE',
 			headers: { 'x-ops-confirmation': confirmation }
 		});
@@ -260,21 +202,21 @@ export class ApiClient {
 
 	async addAccountMembership(id: string, roomId: string, role: 'member' | 'admin') {
 		return this.request<{ role: GangRoomRole }>(
-			`/api/accounts/${encodeURIComponent(id)}/memberships`,
+			`/admin/accounts/${encodeURIComponent(id)}/memberships`,
 			{ method: 'POST', body: JSON.stringify({ roomId, role }) }
 		);
 	}
 
 	async updateAccountMembership(id: string, roomId: string, role: GangRoomRole) {
 		return this.request<{ role: GangRoomRole }>(
-			`/api/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
+			`/admin/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
 			{ method: 'PATCH', body: JSON.stringify({ role }) }
 		);
 	}
 
 	async removeAccountMembership(id: string, roomId: string) {
 		return this.request<{ username: string }>(
-			`/api/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
+			`/admin/accounts/${encodeURIComponent(id)}/memberships/${encodeURIComponent(roomId)}`,
 			{ method: 'DELETE' }
 		);
 	}
@@ -296,7 +238,6 @@ export class ApiClient {
 	private async raw(path: string, init: RequestInit & { json?: boolean } = {}, auth = true) {
 		const headers = new Headers(init.headers);
 		if (auth) headers.set('Authorization', `Bearer ${this.token}`);
-		if (auth && this.actor.trim()) headers.set('x-ops-actor', this.actor.trim());
 		if (init.json !== false && init.body != null && !headers.has('content-type')) {
 			headers.set('content-type', 'application/json');
 		}

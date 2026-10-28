@@ -1,64 +1,23 @@
-export type ConnectionType = 'mysql' | 's3';
+// Shapes the Go server's /api/v1/admin endpoints return. Releases keep the
+// public endpoint's snake_case; everything else is camelCase.
 
-export type ConnectionStatus = 'unknown' | 'healthy' | 'failed';
-
-export type ConnectionPreset = {
-	id: string;
-	name: string;
-	type: ConnectionType;
-	tags: string[];
-	status: ConnectionStatus;
-	lastCheckedAt?: string;
-	lastError?: string;
-	config: MysqlPublicConfig | S3PublicConfig;
-	createdAt: string;
-	updatedAt: string;
+export type AdminOverview = {
+	database: { path: string; sizeBytes: number };
+	storage: { configured: boolean; endpoint: string; bucket: string };
+	releaseSync: S3ReleaseSyncConfig;
 };
 
-export type MysqlPublicConfig = {
-	host: string;
-	port: number;
-	database: string;
-	user: string;
-	ssl: boolean;
-	allowMutations?: boolean;
+export type AdminSession = {
+	username: string;
+	expiresAt: string;
 };
 
-export type MysqlSecretConfig = {
-	password?: string;
+export type AdminLoginResult = {
+	token: string;
+	session: AdminSession;
 };
 
-export type MysqlConnectionInput = {
-	name: string;
-	tags?: string[];
-	type: 'mysql';
-	config: MysqlPublicConfig & MysqlSecretConfig;
-};
-
-export type S3PublicConfig = {
-	endpoint: string;
-	region: string;
-	defaultBucket?: string;
-	forcePathStyle: boolean;
-	allowWrites?: boolean;
-};
-
-export type S3SecretConfig = {
-	accessKeyId?: string;
-	secretAccessKey?: string;
-	sessionToken?: string;
-};
-
-export type S3ConnectionInput = {
-	name: string;
-	tags?: string[];
-	type: 's3';
-	config: S3PublicConfig & S3SecretConfig;
-};
-
-export type ConnectionInput = MysqlConnectionInput | S3ConnectionInput;
-
-export type MysqlColumn = {
+export type DbColumn = {
 	field: string;
 	type: string;
 	nullable: boolean;
@@ -67,31 +26,9 @@ export type MysqlColumn = {
 	extra: string;
 };
 
-export type MysqlTableSummary = {
+export type DbTableSummary = {
 	name: string;
-	rows?: number;
-	engine?: string;
-	updatedAt?: string;
-};
-
-export type MysqlSqlMode = 'read-only' | 'allow-mutations';
-
-export type MysqlSqlPolicy = {
-	mode: MysqlSqlMode;
-	maxRows: number;
-	timeoutMs: number;
-	mutationConfirmation?: string;
-};
-
-export type MysqlQueryResult = {
-	rows: Record<string, unknown>[];
-	fields: string[];
-	affectedRows?: number;
-	warningStatus?: number;
-	executionMs: number;
-	mutation: boolean;
-	limited: boolean;
-	policy: MysqlSqlPolicy;
+	rows: number;
 };
 
 export type S3ObjectSummary = {
@@ -153,7 +90,37 @@ export type S3ReleaseSyncResult = {
 	targetPrefix: string;
 	deleted: number;
 	uploaded: S3ReleaseSyncUploadedObject[];
+	/** The release row the sync created or pointed at the new files. */
+	release?: AppRelease;
 };
+
+export type AppReleaseDownloads = {
+	windows: string;
+	macos: string;
+	android: string;
+};
+
+/** A client version the homepage and the in-app update check show. */
+export type AppRelease = {
+	version: string;
+	title: string;
+	notes: string;
+	/** YYYY-MM-DD, or empty. */
+	release_date: string;
+	published: boolean;
+	/** Clients older than this are told they must update; empty means the release itself. */
+	minimum_supported_version: string;
+	downloads: AppReleaseDownloads;
+	/** Unix milliseconds. */
+	created_at: number;
+	updated_at: number;
+};
+
+export type AppReleaseInput = Partial<
+	Omit<AppRelease, 'downloads' | 'created_at' | 'updated_at'> & {
+		downloads: Partial<AppReleaseDownloads>;
+	}
+>;
 
 export type GangAccountStatus = 'active' | 'suspended' | 'deleted';
 
@@ -215,67 +182,8 @@ export type GangAccountUpdateInput = {
 	status?: 'active' | 'suspended';
 };
 
-export type AuditStatus = 'ok' | 'failed' | 'pending';
-
-export type AuditEvent = {
-	id: string;
-	at: string;
-	actor: string;
-	action: string;
-	target: string;
-	status: AuditStatus;
-	detail?: string;
-	previousHash?: string;
-	hash?: string;
-};
-
-export type AuditIntegrity = {
-	valid: boolean;
-	total: number;
-	signed: number;
-	unsigned: number;
-	headHash?: string;
-	brokenAt?: string;
-	reason?: string;
-};
-
 export type ApiEnvelope<T> = {
 	data: T;
-};
-
-export type AuthRole = 'viewer' | 'operator' | 'admin';
-
-export type AuthUser = {
-	id: string;
-	username: string;
-	displayName: string;
-	role: AuthRole;
-	disabled: boolean;
-	createdAt: string;
-	updatedAt: string;
-	lastLoginAt?: string;
-	lastFailedLoginAt?: string;
-	failedLoginCount?: number;
-	lockedUntil?: string;
-};
-
-export type AuthLoginResult = {
-	token: string;
-	expiresAt: string;
-	idleExpiresAt: string;
-	user: AuthUser;
-};
-
-export type AuthSession = {
-	id: string;
-	userId: string;
-	username: string;
-	createdAt: string;
-	expiresAt: string;
-	idleExpiresAt: string;
-	lastSeenAt: string;
-	revokedAt?: string;
-	current: boolean;
 };
 
 export type ApiError = {

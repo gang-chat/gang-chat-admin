@@ -1,77 +1,60 @@
 # Gang Chat Ops Admin
 
-SvelteKit + Fastify operations panel for Gang Chat infrastructure.
+The operations console for Gang Chat: a static SvelteKit page that talks to the gang-chat
+server's admin API (`/api/v1/admin/*`, in gang-chat-server `internal/admin`). There is no
+backend here any more; the Go server holds the database, the S3 keys and the console's sign-in.
 
 ## What Is Included
 
-- MySQL workbench for table browsing.
-- S3-compatible single-bucket file manager with upload, download and delete actions.
+- Releases: the client versions the homepage shows, with their notes,
+  release date, minimum supported version, download links and whether they are published.
+- S3 file manager for the server's bucket: upload, download, delete, and GitHub release sync.
 - Gang Chat account admin: accounts, sign-in access, and room membership and roles.
-- Session login and role-based access.
+- A read-only view of the server's SQLite database.
 
-The console has no shell or command execution: the SSH terminal and the AI admin worker were
-removed. Old `config.json` keys for them (`agentWorkerToken`, `aiAdminWorker`, `ssh*`,
-`connections.ssh`) are ignored and can be deleted.
+Every change, including refused and failed attempts, is written to the server's
+`admin_audit_log` table.
 
 ## Configuration
 
-The API does not read `.env`. It requires an explicit JSON config file and defaults to `config.json` in the project root. Use `--config path/to/config.json` to load another file.
-
-Required login credentials are configured directly in `config.json`:
+The console's settings live in the gang-chat server's `config.json`:
 
 ```json
 {
-	"adminUsername": "admin",
-	"adminPassword": "dev-admin-password"
+	"admin_username": "ops",
+	"admin_password": "at least 14 characters with lower, upper, digit and symbol",
+
+	"release_sync_repository_url": "https://github.com/gang-chat/gang-chat-client",
+	"release_sync_target_prefix": "releases",
+	"release_sync_asset_prefix": "GangChat",
+	"release_sync_github_token": "optional, for private repos or a higher rate limit",
+	"release_download_base_url": "optional; defaults to <s3_endpoint>/<s3_bucket>"
 }
 ```
 
-The server refuses to start if required config fields are missing. In production, `adminPassword` must satisfy the backend password policy.
+The console stays off (the API answers `503 ADMIN_DISABLED`) until `admin_username` and a strong
+`admin_password` are set; the server log says what is missing. The password must have at least
+14 characters, a lowercase and an uppercase letter, a digit and a symbol, and must not contain
+the username or common words such as `password` or `admin`. Eight wrong passwords lock sign-in
+for 15 minutes. Sessions last 30 days, or until they go unused for a day.
 
-Connection presets are also configured in `config.json` and are read-only at runtime. MySQL has one connection and S3 has one connection bound to one bucket:
+The S3 panel uses the server's own `s3_endpoint`, `s3_bucket` and keys.
 
-```json
-{
-	"connections": {
-		"mysql": {
-			"id": "main-db",
-			"type": "mysql",
-			"name": "Main DB",
-			"config": {
-				"host": "127.0.0.1",
-				"port": 3306,
-				"database": "gang_chat",
-				"user": "gang_ops",
-				"password": "change-me",
-				"ssl": false,
-				"allowMutations": false
-			}
-		},
-		"s3": {
-			"id": "main-s3",
-			"type": "s3",
-			"name": "Object Storage",
-			"config": {
-				"endpoint": "https://s3.example.com",
-				"region": "us-east-1",
-				"defaultBucket": "gang-chat-assets",
-				"forcePathStyle": true,
-				"allowWrites": false,
-				"accessKeyId": "change-me",
-				"secretAccessKey": "change-me"
-			}
-		}
-	}
-}
-```
+## Releases
+
+Each version has a title, notes, a release date, a published flag, a minimum supported version
+and Windows, macOS and Android download links. The newest published version is the version and download buttons on the homepage, which reads
+`GET /api/v1/releases`. `GET /api/v1/app/version` reports it too, with its minimum supported
+version (empty means the version itself); current clients check for updates against the bucket's
+`appcast.xml` and `latest.yml` instead, so the minimum is not enforced anywhere yet.
+
+Every published version with notes shows on the homepage as an announcement. Drafts are hidden
+from both. Deleting a version removes its row only; files in the bucket stay.
 
 ## Account Admin
 
-The Accounts panel manages Gang Chat users directly in the Gang Chat database, through the
-`connections.mysql` preset (so that preset must point at the Gang Chat database). Reading needs
-any role; changes need the `operator` role and `allowMutations: true` on the preset; deleting an
-account needs the `admin` role and the exact username typed as confirmation. Every change is
-recorded in the audit log, including refused and failed attempts.
+Reading and changing accounts needs only a console session. Deleting an account needs the exact
+username typed as confirmation.
 
 | Action               | What it writes                                                                           |
 | -------------------- | ---------------------------------------------------------------------------------------- |
@@ -83,36 +66,23 @@ recorded in the audit log, including refused and failed attempts.
 | Delete               | The user and everything that cascades from it; their messages stay with a name snapshot  |
 | Rooms and roles      | Add to a room, change member/admin, make owner, remove from a room                       |
 
-Each write runs in one transaction and mirrors the SQL the Gang Chat server runs for the same
-action (`internal/auth` and `internal/chat` in gang-chat-server), so the rows look as if the
-server wrote them. Because it bypasses the server, it does not publish the server's realtime
-events or room system messages: open clients see changes on their next refresh. The server
-checks session revocation and account status on every request, so suspensions and sign-outs
-take effect immediately. Other rules it keeps:
+Each write runs in one transaction and reuses the server's own code for the same action
+(`internal/model` and `internal/auth`), so the rows look as if a client made the change. It does
+not publish the server's realtime events or room system messages: open clients see changes on
+their next refresh. The server checks session revocation and account status on every request,
+so suspensions and sign-outs take effect immediately. Other rules it keeps:
 
 - The super user (`GANG`, UID 66666666) is read only here; the server resets it on every start.
 - A room's owner keeps that role until another member is made owner, which turns the old owner
   into an admin. The owner can't be removed from the room.
 - Blacklisted users can't be added to that room.
-- Delete refuses to run until the database has the server's message-retention schema (message
-  sender snapshots, no cascading message foreign key), so it can never erase message history.
-  The server applies that schema when it starts.
-- Creating an account needs the server's `id_sequences` table, which the server creates.
+- Deleting an account first copies the sender's name onto their messages, so message history
+  stays readable.
 
-The MySQL user only needs `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the Gang Chat database.
+## Release Sync
 
-GitHub release sync is optional. When configured, the S3 panel can list release versions from the repository and sync the selected release assets into the configured object prefix:
-
-```json
-{
-	"releaseSync": {
-		"repositoryUrl": "https://github.com/owner/repo",
-		"targetPrefix": "releases/current/",
-		"assetPrefix": "GangChat",
-		"githubToken": "optional-for-private-repos"
-	}
-}
-```
+When `release_sync_repository_url` is set, the S3 panel lists the repository's GitHub releases
+and syncs one into `release_sync_target_prefix`.
 
 The sync clears the target prefix, then selects the first `.dmg`, `.exe`, and `.apk` asset from the
 release and stores them as `<assetPrefix>_<tag>.dmg`, `<assetPrefix>_<tag>.exe`, and
@@ -132,58 +102,62 @@ because they point at the installers:
   `path` and every `files` URL must be the `.exe` this sync uploads
   (`<assetPrefix>_<tag>.exe`); if not, it fails with `RELEASE_LATEST_YML_MISMATCH`.
 
-A failed check leaves the bucket unchanged.
+A failed check leaves the bucket unchanged. All assets are downloaded before anything in the
+bucket is cleared, so a GitHub failure also leaves it as it was.
 
-If the admin app is mounted below a route prefix, configure it in `config.json`:
+After a sync, the version's release row points at the uploaded installers. A version the console
+has never seen is created published, titled `Gang Chat <version>` and dated from GitHub's
+publish time (Beijing time); an existing one keeps its notes and visibility. Links on other
+versions to installers the sync removed are cleared.
 
-```json
-{
-	"basePath": "/admin",
-	"corsOrigin": ["http://ky-z.com"]
+## Deployment
+
+`npm run build` writes a static site to `build/`. Serve it under `/admin/` and send every path
+there to `index.html`; the page calls the API at `/gang-chat/api/v1` on the same origin:
+
+```nginx
+location = /admin {
+    return 301 /admin/;
+}
+location ^~ /admin/ {
+    alias /var/www/gang-chat-admin/;
+    try_files $uri $uri/ /admin/index.html;
 }
 ```
 
-With `basePath` set to `/admin`, the same backend process serves the page, API, and WebSocket endpoints under that prefix:
+Every push to `main` that passes CI is deployed by the `deploy` job in
+`.github/workflows/ci.yml`: it builds, rsyncs `build/` into `/var/www/gang-chat-admin/` on the
+server, and checks that `https://ky-z.com/admin/_app/version.json` matches the build. Its
+secrets are the same as gang-chat-server's deploy: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`,
+and `DEPLOY_PORT` when SSH is not on 22.
 
-- Page: `/admin/`
-- API: `/admin/api/...`
-- WebSocket: `/admin/ws/...`
-- SvelteKit assets: `/admin/_app/...`
+Build-time variables (in the environment or a `.env` file):
 
-Build the web app with the same config file used at runtime:
-
-```sh
-GANG_CHAT_ADMIN_CONFIG=/path/to/config.json npm run build
-npm run start -- --config /path/to/config.json
-```
+| Variable          | Default             | What it does                    |
+| ----------------- | ------------------- | ------------------------------- |
+| `ADMIN_BASE_PATH` | `/admin`            | Where the page is served        |
+| `VITE_API_BASE`   | `/gang-chat/api/v1` | The gang-chat server's API root |
 
 ## Run Locally
+
+Start a gang-chat server on `127.0.0.1:21116` with `admin_username` and `admin_password` in its
+config, then:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Default URL:
-
-- App, API, and WebSocket: `http://127.0.0.1:8787`
-- Login: `admin` / `admin`
-
-Run API with another config file:
-
-```sh
-npm run dev:api -- --config /path/to/config.json
-```
+Open `http://localhost:5173/admin/`. The dev server forwards `/gang-chat/*` to the gang-chat
+server with the prefix stripped, as nginx does; set `GANG_CHAT_SERVER` to use another address.
 
 ## Scripts
 
 ```sh
-npm run dev          # API + frontend
-npm run dev:api      # same single backend as npm run dev
-npm run check        # Svelte/frontend type checks
-npm run check:api    # backend TypeScript check
-npm run test:api     # backend tests
-npm run build        # frontend build + API bundle
+npm run dev          # Vite dev server with the API proxy
+npm run check        # Svelte and TypeScript checks
+npm run lint         # Prettier and ESLint
+npm run build        # static site in build/
 ```
 
 ## Design
@@ -201,6 +175,5 @@ not switch them to Google Fonts, which is unreliable in mainland China. The bran
 
 ## Security Notes
 
-- Do not expose the API without TLS.
-- Use a unique 32+ byte `secretKey` per deployment.
-- MySQL and S3 writes require the preset write flags plus existing destructive confirmations.
+- Serve the console and the API over TLS only; the session token is a bearer token.
+- The console account is separate from the app's super user; give it its own password.

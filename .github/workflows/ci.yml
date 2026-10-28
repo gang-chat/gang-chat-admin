@@ -16,7 +16,63 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: npm run check:api
-      - run: npm run test:api
       - run: npm run lint
       - run: npm run build
+
+  # Publishes the console to https://ky-z.com/admin/ after every push to main
+  # that passes verify. The secrets are the same as gang-chat-server's deploy.
+  deploy:
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${DEPLOY_PORT:-22}" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Upload the build
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          # Hashed chunks land before index.html is swapped, and the old ones
+          # go only after, so an open console keeps loading.
+          rsync -rlptz --delete-after --delay-updates --chmod=D755,F644 \
+            -e "ssh -i ~/.ssh/id_deploy -p ${DEPLOY_PORT:-22} -o BatchMode=yes" \
+            build/ "$DEPLOY_USER@$DEPLOY_HOST:/var/www/gang-chat-admin/"
+
+      - name: Check the live console
+        run: |
+          set -euo pipefail
+          live="$(curl --fail --silent --show-error --max-time 10 https://ky-z.com/admin/_app/version.json)"
+          if [ "$live" != "$(cat build/_app/version.json)" ]; then
+            echo "::error::https://ky-z.com/admin/ is not serving this build."
+            exit 1
+          fi
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_deploy

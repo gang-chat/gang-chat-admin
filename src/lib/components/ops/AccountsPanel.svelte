@@ -20,9 +20,8 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Table from '$lib/components/ui/table';
 	import type { ApiClient } from '$lib/api/client';
+	import { onMount } from 'svelte';
 	import type {
-		AuthRole,
-		ConnectionPreset,
 		GangAccount,
 		GangAccountDetail,
 		GangAccountStatus,
@@ -34,13 +33,9 @@
 
 	let {
 		api,
-		mysqlConnections,
-		currentRole,
 		run
 	}: {
 		api: ApiClient;
-		mysqlConnections: ConnectionPreset[];
-		currentRole?: AuthRole;
 		run: RunTask;
 	} = $props();
 
@@ -69,7 +64,6 @@
 	let offset = $state(0);
 	let total = $state(0);
 	let accounts = $state<GangAccount[]>([]);
-	let loadedFor = $state('');
 	let selectedId = $state('');
 	let detail = $state<GangAccountDetail | undefined>();
 	let profile = $state({ username: '', email: '', displayName: '', emailVerified: false });
@@ -82,30 +76,14 @@
 	let roomResults = $state<GangRoomSummary[]>([]);
 	let addRole = $state<'member' | 'admin'>('member');
 
-	let connection = $derived(mysqlConnections[0]);
-	let writesAllowed = $derived(
-		Boolean(
-			connection?.config &&
-			'allowMutations' in connection.config &&
-			connection.config.allowMutations
-		)
-	);
-	let canOperate = $derived(
-		writesAllowed && (currentRole === 'operator' || currentRole === 'admin')
-	);
-	let canDelete = $derived(writesAllowed && currentRole === 'admin');
-	let editable = $derived(canOperate && !!detail && !detail.isSuperuser);
+	let editable = $derived(!!detail && !detail.isSuperuser);
 	let memberRoomIds = $derived(new Set(detail?.memberships.map((item) => item.roomId) ?? []));
 	let profilePatch = $derived(buildProfilePatch());
 	let canPageBackward = $derived(offset > 0);
 	let canPageForward = $derived(offset + accounts.length < total);
 
-	$effect(() => {
-		const id = connection?.id ?? '';
-		if (id && loadedFor !== id) {
-			loadedFor = id;
-			void loadAccounts();
-		}
+	onMount(() => {
+		void loadAccounts();
 	});
 
 	async function loadAccounts(resetPage = false) {
@@ -323,573 +301,542 @@
 </script>
 
 <section>
-	{#if !connection}
-		<Card.Root>
-			<Card.Content class="text-sm text-muted-foreground">
-				<div class="font-medium text-foreground">Account admin unavailable</div>
-				<div class="mt-1">
-					Accounts are read and changed in the Gang Chat database. Add <code
-						class="font-mono text-[13px] text-foreground">connections.mysql</code
-					> in config.json and restart.
+	<div class="grid gap-4 lg:grid-cols-[minmax(320px,400px)_1fr]">
+		<Card.Root class="min-w-0 self-start">
+			<Card.Header>
+				<div class="flex items-center justify-between gap-2">
+					<div class="min-w-0">
+						<Card.Title>Gang Chat accounts</Card.Title>
+						<Card.Description class="font-mono text-[12px]">{total} found</Card.Description>
+					</div>
+					<Button size="sm" onclick={startCreate}>
+						<Plus class="size-4" /> New
+					</Button>
+				</div>
+			</Card.Header>
+			<Card.Content class="space-y-3">
+				<div class="flex gap-2">
+					<Input
+						bind:value={query}
+						placeholder="Username, email, name or UID"
+						onkeydown={(event) => {
+							if (event.key === 'Enter') void loadAccounts(true);
+						}}
+					/>
+					<Button variant="outline" size="icon" title="Search" onclick={() => loadAccounts(true)}>
+						<Search class="size-4" />
+					</Button>
+				</div>
+				<!-- SegmentedControl: the inverse pill marks the selected filter. -->
+				<div
+					class="inline-flex rounded-full border border-border bg-surface-pressed p-1"
+					role="group"
+					aria-label="Account status"
+				>
+					{#each statusFilters as filter (filter.id)}
+						<button
+							type="button"
+							class="h-7 rounded-full px-3 text-[13px] font-medium transition-colors {statusFilter ===
+							filter.id
+								? 'bg-inverse text-on-inverse'
+								: 'text-muted-foreground hover:text-foreground'}"
+							aria-pressed={statusFilter === filter.id}
+							onclick={() => setStatusFilter(filter.id)}
+						>
+							{filter.label}
+						</button>
+					{/each}
+				</div>
+				<div class="max-h-[560px] space-y-1 overflow-y-auto">
+					{#each accounts as account (account.id)}
+						<button
+							type="button"
+							class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors {selectedId ===
+							account.id
+								? 'bg-inverse text-on-inverse'
+								: 'hover:bg-surface-hover'}"
+							onclick={() => selectAccount(account.id)}
+						>
+							<span
+								class="grid size-8 shrink-0 place-items-center rounded-full font-display text-[13px] font-bold {selectedId ===
+								account.id
+									? 'bg-on-inverse/10'
+									: 'bg-surface-raised text-foreground'}">{initial(account)}</span
+							>
+							<span class="min-w-0 flex-1">
+								<span class="block truncate text-sm font-medium"
+									>{account.displayName || account.username}</span
+								>
+								<span
+									class="block truncate font-mono text-[11px] {selectedId === account.id
+										? 'text-on-inverse/60'
+										: 'text-faint'}">@{account.username} · {account.uid}</span
+								>
+							</span>
+							{#if account.isSuperuser}
+								<Badge variant="outline">super</Badge>
+							{:else if account.status !== 'active'}
+								<Badge variant={statusVariant(account.status)}>{account.status}</Badge>
+							{/if}
+						</button>
+					{/each}
+					{#if accounts.length === 0}
+						<div
+							class="rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
+						>
+							No accounts match.
+						</div>
+					{/if}
+				</div>
+				<div class="flex items-center justify-between gap-2">
+					<span class="font-mono text-[11px] text-faint">
+						{total ? `${offset + 1}–${offset + accounts.length} of ${total}` : ''}
+					</span>
+					<div class="flex gap-2">
+						<Button variant="outline" size="sm" onclick={previousPage} disabled={!canPageBackward}>
+							<ChevronLeft class="size-4" /> Prev
+						</Button>
+						<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>
+							Next <ChevronRight class="size-4" />
+						</Button>
+					</div>
 				</div>
 			</Card.Content>
 		</Card.Root>
-	{:else}
-		{#if !writesAllowed}
-			<div
-				class="mb-4 rounded-md border border-warning/32 bg-warning/10 px-4 py-2.5 text-sm text-warning"
-			>
-				Read only. Set <code class="font-mono text-[13px]">allowMutations</code> on
-				<code class="font-mono text-[13px]">connections.mysql</code> to change accounts.
-			</div>
-		{/if}
-		<div class="grid gap-4 lg:grid-cols-[minmax(320px,400px)_1fr]">
-			<Card.Root class="min-w-0 self-start">
-				<Card.Header>
-					<div class="flex items-center justify-between gap-2">
-						<div class="min-w-0">
-							<Card.Title>Gang Chat accounts</Card.Title>
-							<Card.Description class="font-mono text-[12px]">{total} found</Card.Description>
-						</div>
-						<Button size="sm" onclick={startCreate} disabled={!canOperate}>
-							<Plus class="size-4" /> New
-						</Button>
-					</div>
-				</Card.Header>
-				<Card.Content class="space-y-3">
-					<div class="flex gap-2">
-						<Input
-							bind:value={query}
-							placeholder="Username, email, name or UID"
-							onkeydown={(event) => {
-								if (event.key === 'Enter') void loadAccounts(true);
-							}}
-						/>
-						<Button variant="outline" size="icon" title="Search" onclick={() => loadAccounts(true)}>
-							<Search class="size-4" />
-						</Button>
-					</div>
-					<!-- SegmentedControl: the inverse pill marks the selected filter. -->
-					<div
-						class="inline-flex rounded-full border border-border bg-surface-pressed p-1"
-						role="group"
-						aria-label="Account status"
-					>
-						{#each statusFilters as filter (filter.id)}
-							<button
-								type="button"
-								class="h-7 rounded-full px-3 text-[13px] font-medium transition-colors {statusFilter ===
-								filter.id
-									? 'bg-inverse text-on-inverse'
-									: 'text-muted-foreground hover:text-foreground'}"
-								aria-pressed={statusFilter === filter.id}
-								onclick={() => setStatusFilter(filter.id)}
-							>
-								{filter.label}
-							</button>
-						{/each}
-					</div>
-					<div class="max-h-[560px] space-y-1 overflow-y-auto">
-						{#each accounts as account (account.id)}
-							<button
-								type="button"
-								class="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors {selectedId ===
-								account.id
-									? 'bg-inverse text-on-inverse'
-									: 'hover:bg-surface-hover'}"
-								onclick={() => selectAccount(account.id)}
-							>
-								<span
-									class="grid size-8 shrink-0 place-items-center rounded-full font-display text-[13px] font-bold {selectedId ===
-									account.id
-										? 'bg-on-inverse/10'
-										: 'bg-surface-raised text-foreground'}">{initial(account)}</span
-								>
-								<span class="min-w-0 flex-1">
-									<span class="block truncate text-sm font-medium"
-										>{account.displayName || account.username}</span
-									>
-									<span
-										class="block truncate font-mono text-[11px] {selectedId === account.id
-											? 'text-on-inverse/60'
-											: 'text-faint'}">@{account.username} · {account.uid}</span
-									>
-								</span>
-								{#if account.isSuperuser}
-									<Badge variant="outline">super</Badge>
-								{:else if account.status !== 'active'}
-									<Badge variant={statusVariant(account.status)}>{account.status}</Badge>
-								{/if}
-							</button>
-						{/each}
-						{#if accounts.length === 0}
-							<div
-								class="rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
-							>
-								No accounts match.
-							</div>
-						{/if}
-					</div>
-					<div class="flex items-center justify-between gap-2">
-						<span class="font-mono text-[11px] text-faint">
-							{total ? `${offset + 1}–${offset + accounts.length} of ${total}` : ''}
-						</span>
-						<div class="flex gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onclick={previousPage}
-								disabled={!canPageBackward}
-							>
-								<ChevronLeft class="size-4" /> Prev
-							</Button>
-							<Button variant="outline" size="sm" onclick={nextPage} disabled={!canPageForward}>
-								Next <ChevronRight class="size-4" />
-							</Button>
-						</div>
-					</div>
-				</Card.Content>
-			</Card.Root>
 
-			<div class="min-w-0 space-y-4">
-				{#if selectedId === 'new'}
-					<Card.Root>
-						<Card.Header>
-							<div class="flex items-center justify-between gap-2">
-								<div>
-									<Card.Title>New account</Card.Title>
-									<Card.Description
-										>Created active with a verified email, like a normal sign-up.</Card.Description
+		<div class="min-w-0 space-y-4">
+			{#if selectedId === 'new'}
+				<Card.Root>
+					<Card.Header>
+						<div class="flex items-center justify-between gap-2">
+							<div>
+								<Card.Title>New account</Card.Title>
+								<Card.Description
+									>Created active with a verified email, like a normal sign-up.</Card.Description
+								>
+							</div>
+							<Button
+								variant="ghost"
+								size="icon-sm"
+								title="Cancel"
+								onclick={() => (selectedId = '')}
+							>
+								<X class="size-4" />
+							</Button>
+						</div>
+					</Card.Header>
+					<Card.Content class="grid gap-3 sm:grid-cols-2">
+						<label class="space-y-1.5">
+							<span class="eyebrow block">Username</span>
+							<Input bind:value={draft.username} placeholder="3-32 letters, digits, _ or -" />
+						</label>
+						<label class="space-y-1.5">
+							<span class="eyebrow block">Email</span>
+							<Input type="email" bind:value={draft.email} placeholder="name@example.com" />
+						</label>
+						<label class="space-y-1.5">
+							<span class="eyebrow block">Display name</span>
+							<Input bind:value={draft.displayName} placeholder="Defaults to the username" />
+						</label>
+						<label class="space-y-1.5">
+							<span class="eyebrow block">Password</span>
+							<div class="flex gap-2">
+								<Input bind:value={draft.password} placeholder="8+ characters" />
+								<Button
+									variant="outline"
+									onclick={() => (draft.password = generatePassword())}
+									title="Generate a password">Generate</Button
+								>
+							</div>
+						</label>
+						<div class="sm:col-span-2">
+							<Button
+								onclick={createAccount}
+								disabled={!draft.username.trim() ||
+									!draft.email.trim() ||
+									draft.password.length < 8}
+							>
+								<Plus class="size-4" /> Create account
+							</Button>
+						</div>
+					</Card.Content>
+				</Card.Root>
+			{:else if detail}
+				<Card.Root>
+					<Card.Header>
+						<div class="flex flex-wrap items-start justify-between gap-3">
+							<div class="flex min-w-0 items-center gap-3">
+								<span
+									class="grid size-12 shrink-0 place-items-center rounded-full bg-surface-raised font-display text-lg font-bold"
+									>{initial(detail)}</span
+								>
+								<div class="min-w-0">
+									<Card.Title class="truncate text-[21px]"
+										>{detail.displayName || detail.username}</Card.Title
+									>
+									<Card.Description class="font-mono text-[12px]"
+										>@{detail.username} · UID {detail.uid}</Card.Description
 									>
 								</div>
+							</div>
+							<div class="flex flex-wrap items-center gap-2">
+								{#if detail.isSuperuser}<Badge variant="outline">super user</Badge>{/if}
+								<Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									title="Cancel"
-									onclick={() => (selectedId = '')}
+									title="Reload"
+									onclick={() => selectAccount(detail!.id)}
 								>
-									<X class="size-4" />
+									<RefreshCw class="size-4" />
 								</Button>
 							</div>
-						</Card.Header>
-						<Card.Content class="grid gap-3 sm:grid-cols-2">
+						</div>
+					</Card.Header>
+					<Card.Content class="space-y-5">
+						<dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+							{#each [['Created', formatDate(detail.createdAt)], ['Last seen', formatDate(detail.lastSeenAt)], ['Active sessions', String(detail.activeSessionCount)], ['Rooms', String(detail.roomCount)]] as [label, value] (label)}
+								<div class="rounded-md border border-border bg-card px-3 py-2.5">
+									<dt class="eyebrow">{label}</dt>
+									<dd class="mt-1 font-mono text-[13px] text-foreground">{value}</dd>
+								</div>
+							{/each}
+						</dl>
+
+						{#if detail.isSuperuser}
+							<div
+								class="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
+							>
+								The super user is managed by the Gang Chat server, which resets it on every start,
+								so it is read only here.
+							</div>
+						{/if}
+
+						<div class="grid gap-3 sm:grid-cols-2">
 							<label class="space-y-1.5">
 								<span class="eyebrow block">Username</span>
-								<Input bind:value={draft.username} placeholder="3-32 letters, digits, _ or -" />
-							</label>
-							<label class="space-y-1.5">
-								<span class="eyebrow block">Email</span>
-								<Input type="email" bind:value={draft.email} placeholder="name@example.com" />
+								<Input bind:value={profile.username} disabled={!editable} />
 							</label>
 							<label class="space-y-1.5">
 								<span class="eyebrow block">Display name</span>
-								<Input bind:value={draft.displayName} placeholder="Defaults to the username" />
+								<Input bind:value={profile.displayName} disabled={!editable} />
 							</label>
 							<label class="space-y-1.5">
-								<span class="eyebrow block">Password</span>
-								<div class="flex gap-2">
-									<Input bind:value={draft.password} placeholder="8+ characters" />
-									<Button
-										variant="outline"
-										onclick={() => (draft.password = generatePassword())}
-										title="Generate a password">Generate</Button
-									>
-								</div>
+								<span class="eyebrow block">Email</span>
+								<Input type="email" bind:value={profile.email} disabled={!editable} />
 							</label>
-							<div class="sm:col-span-2">
-								<Button
-									onclick={createAccount}
-									disabled={!canOperate ||
-										!draft.username.trim() ||
-										!draft.email.trim() ||
-										draft.password.length < 8}
-								>
-									<Plus class="size-4" /> Create account
-								</Button>
-							</div>
-						</Card.Content>
-					</Card.Root>
-				{:else if detail}
-					<Card.Root>
-						<Card.Header>
-							<div class="flex flex-wrap items-start justify-between gap-3">
-								<div class="flex min-w-0 items-center gap-3">
-									<span
-										class="grid size-12 shrink-0 place-items-center rounded-full bg-surface-raised font-display text-lg font-bold"
-										>{initial(detail)}</span
-									>
-									<div class="min-w-0">
-										<Card.Title class="truncate text-[21px]"
-											>{detail.displayName || detail.username}</Card.Title
-										>
-										<Card.Description class="font-mono text-[12px]"
-											>@{detail.username} · UID {detail.uid}</Card.Description
-										>
-									</div>
-								</div>
-								<div class="flex flex-wrap items-center gap-2">
-									{#if detail.isSuperuser}<Badge variant="outline">super user</Badge>{/if}
-									<Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
-									<Button
-										variant="ghost"
-										size="icon-sm"
-										title="Reload"
-										onclick={() => selectAccount(detail!.id)}
-									>
-										<RefreshCw class="size-4" />
-									</Button>
-								</div>
-							</div>
-						</Card.Header>
-						<Card.Content class="space-y-5">
-							<dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-								{#each [['Created', formatDate(detail.createdAt)], ['Last seen', formatDate(detail.lastSeenAt)], ['Active sessions', String(detail.activeSessionCount)], ['Rooms', String(detail.roomCount)]] as [label, value] (label)}
-									<div class="rounded-md border border-border bg-card px-3 py-2.5">
-										<dt class="eyebrow">{label}</dt>
-										<dd class="mt-1 font-mono text-[13px] text-foreground">{value}</dd>
-									</div>
-								{/each}
-							</dl>
-
-							{#if detail.isSuperuser}
-								<div
-									class="rounded-md border border-border bg-card px-4 py-3 text-sm text-muted-foreground"
-								>
-									The super user is managed by the Gang Chat server, which resets it on every start,
-									so it is read only here.
-								</div>
-							{/if}
-
-							<div class="grid gap-3 sm:grid-cols-2">
-								<label class="space-y-1.5">
-									<span class="eyebrow block">Username</span>
-									<Input bind:value={profile.username} disabled={!editable} />
+							<div class="flex items-end gap-3 pb-2">
+								<label class="flex items-center gap-2 text-sm text-muted-foreground">
+									<Checkbox bind:checked={profile.emailVerified} disabled={!editable} />
+									Email verified
 								</label>
-								<label class="space-y-1.5">
-									<span class="eyebrow block">Display name</span>
-									<Input bind:value={profile.displayName} disabled={!editable} />
-								</label>
-								<label class="space-y-1.5">
-									<span class="eyebrow block">Email</span>
-									<Input type="email" bind:value={profile.email} disabled={!editable} />
-								</label>
-								<div class="flex items-end gap-3 pb-2">
-									<label class="flex items-center gap-2 text-sm text-muted-foreground">
-										<Checkbox bind:checked={profile.emailVerified} disabled={!editable} />
-										Email verified
-									</label>
-								</div>
 							</div>
-							<div class="flex flex-wrap gap-2">
-								<Button
-									onclick={saveProfile}
-									disabled={!editable || Object.keys(profilePatch).length === 0}
-								>
-									Save changes
-								</Button>
-								{#if Object.keys(profilePatch).length > 0}
-									<Button variant="outline" onclick={() => detail && showDetail(detail)}>
-										Discard
-									</Button>
-								{/if}
-							</div>
-						</Card.Content>
-					</Card.Root>
-
-					<Card.Root>
-						<Card.Header>
-							<Card.Title>Access</Card.Title>
-							<Card.Description
-								>Suspending or resetting the password signs the account out everywhere.</Card.Description
+						</div>
+						<div class="flex flex-wrap gap-2">
+							<Button
+								onclick={saveProfile}
+								disabled={!editable || Object.keys(profilePatch).length === 0}
 							>
-						</Card.Header>
-						<Card.Content class="space-y-4">
-							<div class="flex flex-wrap gap-2">
-								{#if detail.status === 'active'}
-									<Button
-										variant="outline"
-										onclick={() => (pending = { kind: 'suspend' })}
-										disabled={!editable}
-									>
-										<ShieldOff class="size-4" /> Suspend
-									</Button>
-								{:else}
-									<Button
-										variant="outline"
-										onclick={() => (pending = { kind: 'reactivate' })}
-										disabled={!editable}
-									>
-										<UserCheck class="size-4" /> Reactivate
-									</Button>
-								{/if}
+								Save changes
+							</Button>
+							{#if Object.keys(profilePatch).length > 0}
+								<Button variant="outline" onclick={() => detail && showDetail(detail)}>
+									Discard
+								</Button>
+							{/if}
+						</div>
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Access</Card.Title>
+						<Card.Description
+							>Suspending or resetting the password signs the account out everywhere.</Card.Description
+						>
+					</Card.Header>
+					<Card.Content class="space-y-4">
+						<div class="flex flex-wrap gap-2">
+							{#if detail.status === 'active'}
 								<Button
 									variant="outline"
-									onclick={() => (pending = { kind: 'signout' })}
-									disabled={!canOperate || detail.activeSessionCount === 0}
+									onclick={() => (pending = { kind: 'suspend' })}
+									disabled={!editable}
 								>
-									<LogOut class="size-4" /> Sign out everywhere
+									<ShieldOff class="size-4" /> Suspend
 								</Button>
-								<Button
-									variant="destructive"
-									onclick={() => {
-										deleteOpen = !deleteOpen;
-										deleteConfirmation = '';
-									}}
-									disabled={!canDelete || detail.isSuperuser}
-								>
-									<Trash2 class="size-4" /> Delete account
-								</Button>
-							</div>
-
-							{#if pending && (pending.kind === 'suspend' || pending.kind === 'reactivate' || pending.kind === 'signout')}
-								<div
-									class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-strong bg-card px-4 py-3 text-sm"
-								>
-									<span>
-										{#if pending.kind === 'suspend'}
-											Suspend @{detail.username}? They are signed out and can't sign in until
-											reactivated.
-										{:else if pending.kind === 'reactivate'}
-											Reactivate @{detail.username}? They can sign in again.
-										{:else}
-											Sign @{detail.username} out of all {detail.activeSessionCount} sessions?
-										{/if}
-									</span>
-									<span class="flex gap-2">
-										<Button size="sm" onclick={confirmPending}>Confirm</Button>
-										<Button variant="outline" size="sm" onclick={() => (pending = undefined)}
-											>Cancel</Button
-										>
-									</span>
-								</div>
-							{/if}
-
-							<div class="flex flex-wrap items-end gap-2">
-								<label class="min-w-[220px] flex-1 space-y-1.5">
-									<span class="eyebrow block">New password</span>
-									<Input
-										bind:value={newPassword}
-										placeholder="8+ characters"
-										disabled={!editable}
-									/>
-								</label>
+							{:else}
 								<Button
 									variant="outline"
-									onclick={() => (newPassword = generatePassword())}
-									disabled={!editable}>Generate</Button
+									onclick={() => (pending = { kind: 'reactivate' })}
+									disabled={!editable}
 								>
-								<Button onclick={resetPassword} disabled={!editable || newPassword.length < 8}>
-									<KeyRound class="size-4" /> Reset password
+									<UserCheck class="size-4" /> Reactivate
 								</Button>
-							</div>
-
-							{#if deleteOpen}
-								<div
-									class="rounded-lg border border-danger-border bg-danger-surface p-4 text-xs text-destructive"
-								>
-									<div class="eyebrow text-destructive">Delete account</div>
-									<p class="mt-2 text-[13px] leading-relaxed">
-										Permanently deletes @{detail.username} and their room memberships, sessions and settings.
-										Their messages stay, shown with a snapshot of their name. This can't be undone.
-									</p>
-									<Input
-										class="mt-3"
-										bind:value={deleteConfirmation}
-										placeholder={`type ${detail.username} to confirm`}
-									/>
-									<div class="mt-3 flex gap-2">
-										<Button
-											variant="destructive"
-											onclick={deleteAccount}
-											disabled={!canDelete || deleteConfirmation !== detail.username}
-										>
-											<Trash2 class="size-4" /> Delete permanently
-										</Button>
-										<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
-									</div>
-								</div>
 							{/if}
-						</Card.Content>
-					</Card.Root>
+							<Button
+								variant="outline"
+								onclick={() => (pending = { kind: 'signout' })}
+								disabled={detail.activeSessionCount === 0}
+							>
+								<LogOut class="size-4" /> Sign out everywhere
+							</Button>
+							<Button
+								variant="destructive"
+								onclick={() => {
+									deleteOpen = !deleteOpen;
+									deleteConfirmation = '';
+								}}
+								disabled={detail.isSuperuser}
+							>
+								<Trash2 class="size-4" /> Delete account
+							</Button>
+						</div>
 
-					<Card.Root>
-						<Card.Header>
-							<Card.Title>Rooms and roles</Card.Title>
-							<Card.Description>
-								Owner is the room's creator. Making someone owner turns the current owner into an
-								admin.
-							</Card.Description>
-						</Card.Header>
-						<Card.Content class="space-y-4">
-							{#if detail.memberships.length}
-								<Table.Root>
-									<Table.Header>
+						{#if pending && (pending.kind === 'suspend' || pending.kind === 'reactivate' || pending.kind === 'signout')}
+							<div
+								class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-strong bg-card px-4 py-3 text-sm"
+							>
+								<span>
+									{#if pending.kind === 'suspend'}
+										Suspend @{detail.username}? They are signed out and can't sign in until
+										reactivated.
+									{:else if pending.kind === 'reactivate'}
+										Reactivate @{detail.username}? They can sign in again.
+									{:else}
+										Sign @{detail.username} out of all {detail.activeSessionCount} sessions?
+									{/if}
+								</span>
+								<span class="flex gap-2">
+									<Button size="sm" onclick={confirmPending}>Confirm</Button>
+									<Button variant="outline" size="sm" onclick={() => (pending = undefined)}
+										>Cancel</Button
+									>
+								</span>
+							</div>
+						{/if}
+
+						<div class="flex flex-wrap items-end gap-2">
+							<label class="min-w-[220px] flex-1 space-y-1.5">
+								<span class="eyebrow block">New password</span>
+								<Input bind:value={newPassword} placeholder="8+ characters" disabled={!editable} />
+							</label>
+							<Button
+								variant="outline"
+								onclick={() => (newPassword = generatePassword())}
+								disabled={!editable}>Generate</Button
+							>
+							<Button onclick={resetPassword} disabled={!editable || newPassword.length < 8}>
+								<KeyRound class="size-4" /> Reset password
+							</Button>
+						</div>
+
+						{#if deleteOpen}
+							<div
+								class="rounded-lg border border-danger-border bg-danger-surface p-4 text-xs text-destructive"
+							>
+								<div class="eyebrow text-destructive">Delete account</div>
+								<p class="mt-2 text-[13px] leading-relaxed">
+									Permanently deletes @{detail.username} and their room memberships, sessions and settings.
+									Their messages stay, shown with a snapshot of their name. This can't be undone.
+								</p>
+								<Input
+									class="mt-3"
+									bind:value={deleteConfirmation}
+									placeholder={`type ${detail.username} to confirm`}
+								/>
+								<div class="mt-3 flex gap-2">
+									<Button
+										variant="destructive"
+										onclick={deleteAccount}
+										disabled={deleteConfirmation !== detail.username}
+									>
+										<Trash2 class="size-4" /> Delete permanently
+									</Button>
+									<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
+								</div>
+							</div>
+						{/if}
+					</Card.Content>
+				</Card.Root>
+
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Rooms and roles</Card.Title>
+						<Card.Description>
+							Owner is the room's creator. Making someone owner turns the current owner into an
+							admin.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="space-y-4">
+						{#if detail.memberships.length}
+							<Table.Root>
+								<Table.Header>
+									<Table.Row>
+										<Table.Head>Room</Table.Head>
+										<Table.Head>RID</Table.Head>
+										<Table.Head>Role</Table.Head>
+										<Table.Head>Joined</Table.Head>
+										<Table.Head></Table.Head>
+									</Table.Row>
+								</Table.Header>
+								<Table.Body>
+									{#each detail.memberships as membership (membership.roomId)}
 										<Table.Row>
-											<Table.Head>Room</Table.Head>
-											<Table.Head>RID</Table.Head>
-											<Table.Head>Role</Table.Head>
-											<Table.Head>Joined</Table.Head>
-											<Table.Head></Table.Head>
-										</Table.Row>
-									</Table.Header>
-									<Table.Body>
-										{#each detail.memberships as membership (membership.roomId)}
-											<Table.Row>
-												<Table.Cell>
-													<div class="flex items-center gap-2">
-														<span
-															class="grid size-7 shrink-0 place-items-center rounded-sm bg-surface-raised font-display text-[12px] font-bold"
-															>{membership.roomName.charAt(0).toUpperCase()}</span
-														>
-														<span class="truncate">{membership.roomName}</span>
-													</div>
-												</Table.Cell>
-												<Table.Cell class="font-mono text-[12px] text-muted-foreground"
-													>{membership.rid}</Table.Cell
-												>
-												<Table.Cell>
-													<!-- Remount when a pending owner change is cancelled so the menu shows the real role. -->
-													{#key `${membership.role}:${pending?.kind === 'owner' && pending.roomId === membership.roomId}`}
-														<Select.Root
-															type="single"
-															value={membership.role}
-															onValueChange={(value) =>
-																requestRole(membership.roomId, membership.roomName, value)}
-															disabled={!editable || membership.role === 'owner'}
-														>
-															<Select.Trigger
-																size="sm"
-																class="w-[116px]"
-																aria-label={`Role in ${membership.roomName}`}
-															>
-																{roleLabels[membership.role]}
-															</Select.Trigger>
-															<Select.Content>
-																{#each ['member', 'admin', 'owner'] as role (role)}
-																	<Select.Item value={role}
-																		>{roleLabels[role as GangRoomRole]}</Select.Item
-																	>
-																{/each}
-															</Select.Content>
-														</Select.Root>
-													{/key}
-												</Table.Cell>
-												<Table.Cell class="font-mono text-[12px] text-muted-foreground"
-													>{formatDate(membership.joinedAt)}</Table.Cell
-												>
-												<Table.Cell class="text-right">
-													<Button
-														variant="destructive"
-														size="icon-xs"
-														title="Remove from room"
-														onclick={() =>
-															(pending = {
-																kind: 'remove',
-																roomId: membership.roomId,
-																roomName: membership.roomName
-															})}
+											<Table.Cell>
+												<div class="flex items-center gap-2">
+													<span
+														class="grid size-7 shrink-0 place-items-center rounded-sm bg-surface-raised font-display text-[12px] font-bold"
+														>{membership.roomName.charAt(0).toUpperCase()}</span
+													>
+													<span class="truncate">{membership.roomName}</span>
+												</div>
+											</Table.Cell>
+											<Table.Cell class="font-mono text-[12px] text-muted-foreground"
+												>{membership.rid}</Table.Cell
+											>
+											<Table.Cell>
+												<!-- Remount when a pending owner change is cancelled so the menu shows the real role. -->
+												{#key `${membership.role}:${pending?.kind === 'owner' && pending.roomId === membership.roomId}`}
+													<Select.Root
+														type="single"
+														value={membership.role}
+														onValueChange={(value) =>
+															requestRole(membership.roomId, membership.roomName, value)}
 														disabled={!editable || membership.role === 'owner'}
 													>
-														<X class="size-3" />
-													</Button>
-												</Table.Cell>
-											</Table.Row>
-										{/each}
-									</Table.Body>
-								</Table.Root>
-							{:else}
-								<div
-									class="rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
-								>
-									Not in any room.
-								</div>
-							{/if}
-
-							{#if pending && (pending.kind === 'remove' || pending.kind === 'owner')}
-								<div
-									class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-strong bg-card px-4 py-3 text-sm"
-								>
-									<span>
-										{#if pending.kind === 'remove'}
-											Remove @{detail.username} from {pending.roomName}?
-										{:else}
-											Make @{detail.username} the owner of {pending.roomName}? The current owner
-											becomes an admin.
-										{/if}
-									</span>
-									<span class="flex gap-2">
-										<Button size="sm" onclick={confirmPending}>Confirm</Button>
-										<Button variant="outline" size="sm" onclick={() => (pending = undefined)}
-											>Cancel</Button
-										>
-									</span>
-								</div>
-							{/if}
-
-							<div class="space-y-3 rounded-lg border border-border bg-card p-4">
-								<div class="eyebrow">Add to a room</div>
-								<div class="flex flex-wrap gap-2">
-									<Input
-										class="min-w-[200px] flex-1"
-										bind:value={roomQuery}
-										placeholder="Room name or RID"
-										disabled={!editable}
-										onkeydown={(event) => {
-											if (event.key === 'Enter') void searchRooms();
-										}}
-									/>
-									<Button variant="outline" onclick={searchRooms} disabled={!editable}>
-										<Search class="size-4" /> Find
-									</Button>
-									<Select.Root
-										type="single"
-										value={addRole}
-										onValueChange={(value) => (addRole = value as 'member' | 'admin')}
-									>
-										<Select.Trigger class="w-[116px]" aria-label="Role for the new room">
-											{roleLabels[addRole]}
-										</Select.Trigger>
-										<Select.Content>
-											<Select.Item value="member">Member</Select.Item>
-											<Select.Item value="admin">Admin</Select.Item>
-										</Select.Content>
-									</Select.Root>
-								</div>
-								{#if roomResults.length}
-									<div class="space-y-1">
-										{#each roomResults as room (room.id)}
-											<div
-												class="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-surface-hover"
+														<Select.Trigger
+															size="sm"
+															class="w-[116px]"
+															aria-label={`Role in ${membership.roomName}`}
+														>
+															{roleLabels[membership.role]}
+														</Select.Trigger>
+														<Select.Content>
+															{#each ['member', 'admin', 'owner'] as role (role)}
+																<Select.Item value={role}
+																	>{roleLabels[role as GangRoomRole]}</Select.Item
+																>
+															{/each}
+														</Select.Content>
+													</Select.Root>
+												{/key}
+											</Table.Cell>
+											<Table.Cell class="font-mono text-[12px] text-muted-foreground"
+												>{formatDate(membership.joinedAt)}</Table.Cell
 											>
-												<span class="min-w-0 truncate text-sm">
-													{room.name}
-													<span class="ml-2 font-mono text-[11px] text-faint"
-														>{room.rid} · {room.memberCount} members</span
-													>
-												</span>
+											<Table.Cell class="text-right">
 												<Button
-													size="sm"
-													variant="outline"
-													onclick={() => addToRoom(room)}
-													disabled={!editable || memberRoomIds.has(room.id)}
+													variant="destructive"
+													size="icon-xs"
+													title="Remove from room"
+													onclick={() =>
+														(pending = {
+															kind: 'remove',
+															roomId: membership.roomId,
+															roomName: membership.roomName
+														})}
+													disabled={!editable || membership.role === 'owner'}
 												>
-													{memberRoomIds.has(room.id) ? 'Joined' : 'Add'}
+													<X class="size-3" />
 												</Button>
-											</div>
-										{/each}
-									</div>
-								{/if}
+											</Table.Cell>
+										</Table.Row>
+									{/each}
+								</Table.Body>
+							</Table.Root>
+						{:else}
+							<div
+								class="rounded-md border border-dashed border-border-strong px-3 py-6 text-center text-sm text-faint"
+							>
+								Not in any room.
 							</div>
-						</Card.Content>
-					</Card.Root>
-				{:else}
-					<Card.Root>
-						<Card.Content class="py-10 text-center text-sm text-faint">
-							Select an account to see its profile, access and rooms.
-						</Card.Content>
-					</Card.Root>
-				{/if}
-			</div>
+						{/if}
+
+						{#if pending && (pending.kind === 'remove' || pending.kind === 'owner')}
+							<div
+								class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border-strong bg-card px-4 py-3 text-sm"
+							>
+								<span>
+									{#if pending.kind === 'remove'}
+										Remove @{detail.username} from {pending.roomName}?
+									{:else}
+										Make @{detail.username} the owner of {pending.roomName}? The current owner
+										becomes an admin.
+									{/if}
+								</span>
+								<span class="flex gap-2">
+									<Button size="sm" onclick={confirmPending}>Confirm</Button>
+									<Button variant="outline" size="sm" onclick={() => (pending = undefined)}
+										>Cancel</Button
+									>
+								</span>
+							</div>
+						{/if}
+
+						<div class="space-y-3 rounded-lg border border-border bg-card p-4">
+							<div class="eyebrow">Add to a room</div>
+							<div class="flex flex-wrap gap-2">
+								<Input
+									class="min-w-[200px] flex-1"
+									bind:value={roomQuery}
+									placeholder="Room name or RID"
+									disabled={!editable}
+									onkeydown={(event) => {
+										if (event.key === 'Enter') void searchRooms();
+									}}
+								/>
+								<Button variant="outline" onclick={searchRooms} disabled={!editable}>
+									<Search class="size-4" /> Find
+								</Button>
+								<Select.Root
+									type="single"
+									value={addRole}
+									onValueChange={(value) => (addRole = value as 'member' | 'admin')}
+								>
+									<Select.Trigger class="w-[116px]" aria-label="Role for the new room">
+										{roleLabels[addRole]}
+									</Select.Trigger>
+									<Select.Content>
+										<Select.Item value="member">Member</Select.Item>
+										<Select.Item value="admin">Admin</Select.Item>
+									</Select.Content>
+								</Select.Root>
+							</div>
+							{#if roomResults.length}
+								<div class="space-y-1">
+									{#each roomResults as room (room.id)}
+										<div
+											class="flex items-center justify-between gap-3 rounded-md px-3 py-2 hover:bg-surface-hover"
+										>
+											<span class="min-w-0 truncate text-sm">
+												{room.name}
+												<span class="ml-2 font-mono text-[11px] text-faint"
+													>{room.rid} · {room.memberCount} members</span
+												>
+											</span>
+											<Button
+												size="sm"
+												variant="outline"
+												onclick={() => addToRoom(room)}
+												disabled={!editable || memberRoomIds.has(room.id)}
+											>
+												{memberRoomIds.has(room.id) ? 'Joined' : 'Add'}
+											</Button>
+										</div>
+									{/each}
+								</div>
+							{/if}
+						</div>
+					</Card.Content>
+				</Card.Root>
+			{:else}
+				<Card.Root>
+					<Card.Content class="py-10 text-center text-sm text-faint">
+						Select an account to see its profile, access and rooms.
+					</Card.Content>
+				</Card.Root>
+			{/if}
 		</div>
-	{/if}
+	</div>
 </section>

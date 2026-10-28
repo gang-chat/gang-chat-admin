@@ -7,7 +7,6 @@ node_modules
 .wrangler
 /.svelte-kit
 /build
-server/dist
 
 # OS
 .DS_Store
@@ -19,16 +18,8 @@ Thumbs.db
 !.env.example
 !.env.test
 
-# Local ops runtime
+# The old Fastify backend's config, which held passwords and keys
 config.json
-.ops-data/
-.ops-dev*.log
-.ops-dev.pid
-.ops-api-smoke*.log
-.ops-api*.log
-.ops-preview*.log
-.ops-web*.log
-.vite-one*.log
 
 # Vite
 vite.config.js.timestamp-*

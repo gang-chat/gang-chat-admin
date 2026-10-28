@@ -17,9 +17,9 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Table from '$lib/components/ui/table';
 	import type { ApiClient } from '$lib/api/client';
+	import { onMount } from 'svelte';
 	import type {
-		AuthRole,
-		ConnectionPreset,
+		AdminOverview,
 		S3ObjectSummary,
 		S3ReleaseSyncConfig,
 		S3ReleaseVersion
@@ -28,20 +28,20 @@
 
 	let {
 		api,
-		s3Connections,
-		currentRole,
+		storage,
+		releaseSyncConfig,
 		run,
-		onAuditRefresh
+		onReleaseSynced
 	}: {
 		api: ApiClient;
-		s3Connections: ConnectionPreset[];
-		currentRole?: AuthRole;
+		storage: AdminOverview['storage'];
+		releaseSyncConfig: S3ReleaseSyncConfig;
 		run: RunTask;
-		onAuditRefresh: () => Promise<void>;
+		/** Called after a sync, which also updates the synced version's release. */
+		onReleaseSynced: () => Promise<void>;
 	} = $props();
 
-	let connectionId = $state('');
-	let bucket = $state('');
+	let bucket = $derived(storage.configured ? storage.bucket : '');
 	let prefix = $state('');
 	let maxKeys = $state(500);
 	let maxKeysValue = $state('500');
@@ -57,34 +57,17 @@
 	let overwriteConfirmKey = $state('');
 	let deleteCandidate = $state<S3ObjectSummary | undefined>();
 	let deleteConfirmKey = $state('');
-	let releaseSyncConfig = $state<S3ReleaseSyncConfig>({ enabled: false });
 	let releaseVersions = $state<S3ReleaseVersion[]>([]);
-	let releaseLoadedFor = $state('');
 	let selectedReleaseTag = $state('');
 	let releaseSyncSummary = $state('');
 
 	let selectedObject = $derived(objects.find((object) => object.key === selectedKey));
-	let selectedConnection = $derived(
-		s3Connections.find((item) => item.id === connectionId && item.type === 's3')
-	);
-	let writesAllowed = $derived(
-		Boolean(
-			selectedConnection?.config &&
-			'allowWrites' in selectedConnection.config &&
-			selectedConnection.config.allowWrites
-		)
-	);
-	let configuredBucket = $derived(configuredBucketName(selectedConnection));
-	let canOperate = $derived(currentRole === 'operator' || currentRole === 'admin');
 	let resolvedUploadKey = $derived(resolveUploadKey());
 	let uploadOverwrites = $derived(
 		Boolean(resolvedUploadKey && objects.some((object) => object.key === resolvedUploadKey))
 	);
 	let canUpload = $derived(
 		Boolean(
-			connectionId &&
-			canOperate &&
-			writesAllowed &&
 			bucket &&
 			uploadFile &&
 			resolvedUploadKey &&
@@ -94,27 +77,18 @@
 	let selectedRelease = $derived(
 		releaseVersions.find((release) => release.tagName === selectedReleaseTag)
 	);
-	let canSyncRelease = $derived(
-		Boolean(
-			connectionId &&
-			bucket &&
-			canOperate &&
-			writesAllowed &&
-			releaseSyncConfig.enabled &&
-			selectedReleaseTag
-		)
-	);
+	let canSyncRelease = $derived(Boolean(bucket && releaseSyncConfig.enabled && selectedReleaseTag));
 	let canPageBackward = $derived(pageTokens.length > 0);
 	let canPageForward = $derived(Boolean(nextContinuationToken));
 
 	async function loadObjects(resetPage = false) {
-		if (!connectionId || !bucket) return;
+		if (!bucket) return;
 		if (resetPage) {
 			pageTokens = [];
 			currentPageToken = undefined;
 		}
 		await run(async () => {
-			const result = await api.s3Objects(connectionId, bucket, {
+			const result = await api.s3Objects({
 				prefix,
 				continuationToken: currentPageToken,
 				maxKeys: Number(maxKeys)
@@ -131,17 +105,10 @@
 	}
 
 	async function loadReleaseSync() {
-		if (!connectionId) return;
+		if (!releaseSyncConfig.enabled) return;
 		await run(async () => {
-			const config = await api.s3ReleaseSyncConfig(connectionId);
-			releaseSyncConfig = config;
 			releaseSyncSummary = '';
-			if (!config.enabled) {
-				releaseVersions = [];
-				selectedReleaseTag = '';
-				return;
-			}
-			releaseVersions = await api.s3ReleaseVersions(connectionId);
+			releaseVersions = await api.s3ReleaseVersions();
 			if (!releaseVersions.some((release) => release.tagName === selectedReleaseTag)) {
 				selectedReleaseTag = releaseVersions[0]?.tagName ?? '';
 			}
@@ -151,51 +118,48 @@
 	async function syncRelease() {
 		if (!canSyncRelease || !selectedReleaseTag) return;
 		await run(async () => {
-			const result = await api.s3SyncRelease(connectionId, bucket, selectedReleaseTag);
+			const result = await api.s3SyncRelease(selectedReleaseTag);
 			releaseSyncSummary = `${result.tagName}: uploaded ${result.uploaded.length}, deleted ${result.deleted}`;
 			prefix = result.targetPrefix;
 			await loadObjects(true);
-			await onAuditRefresh();
+			await onReleaseSynced();
 		}, 'Release synced');
 	}
 
 	async function uploadObject() {
-		if (!connectionId || !bucket || !uploadFile || !canUpload) return;
+		if (!bucket || !uploadFile || !canUpload) return;
 		const form = new FormData();
-		form.set('bucket', bucket);
 		form.set('key', resolvedUploadKey);
 		form.set('overwrite', allowOverwrite ? 'true' : 'false');
 		if (allowOverwrite) form.set('overwriteConfirmation', overwriteConfirmKey);
 		if (uploadFile.type) form.set('contentType', uploadFile.type);
 		form.set('file', uploadFile);
 		await run(async () => {
-			await api.s3Upload(connectionId, form);
+			await api.s3Upload(form);
 			uploadKey = '';
 			uploadFile = undefined;
 			allowOverwrite = false;
 			overwriteConfirmKey = '';
 			await loadObjects(true);
-			await onAuditRefresh();
 		}, 'Object uploaded');
 	}
 
 	async function deleteObject() {
-		if (!connectionId || !bucket) return;
+		if (!bucket) return;
 		if (!deleteCandidate || deleteConfirmKey !== deleteCandidate.key) return;
 		const target = deleteCandidate;
 		await run(async () => {
-			await api.s3Delete(connectionId, bucket, target.key, deleteConfirmKey);
+			await api.s3Delete(target.key, deleteConfirmKey);
 			await loadObjects(false);
-			await onAuditRefresh();
 			deleteCandidate = undefined;
 			deleteConfirmKey = '';
 		}, 'Object deleted');
 	}
 
 	async function downloadObject(key: string) {
-		if (!connectionId || !bucket) return;
+		if (!bucket) return;
 		await run(async () => {
-			const response = await api.s3Download(connectionId, bucket, key);
+			const response = await api.s3Download(key);
 			const blob = await response.blob();
 			const url = URL.createObjectURL(blob);
 			const anchor = document.createElement('a');
@@ -256,12 +220,6 @@
 		uploadFile = (event.currentTarget as HTMLInputElement).files?.[0];
 	}
 
-	function configuredBucketName(connection: ConnectionPreset | undefined) {
-		const config = connection?.config;
-		if (!config || !('endpoint' in config)) return '';
-		return config.defaultBucket || '';
-	}
-
 	function parentPrefix(value: string) {
 		const trimmed = value.endsWith('/') ? value.slice(0, -1) : value;
 		const index = trimmed.lastIndexOf('/');
@@ -289,33 +247,21 @@
 		if (maxKeysValue !== String(maxKeys)) maxKeysValue = String(maxKeys);
 	});
 
-	$effect(() => {
-		const configuredId = s3Connections[0]?.id ?? '';
-		if (configuredId && connectionId !== configuredId) connectionId = configuredId;
-		if (configuredBucket && bucket !== configuredBucket) {
-			bucket = configuredBucket;
-			prefix = '';
-			void loadObjects(true);
-		}
-	});
-
-	$effect(() => {
-		if (connectionId && releaseLoadedFor !== connectionId) {
-			releaseLoadedFor = connectionId;
-			void loadReleaseSync();
-		}
+	onMount(() => {
+		void loadObjects(true);
+		void loadReleaseSync();
 	});
 </script>
 
 <section>
-	{#if !connectionId || !bucket}
+	{#if !bucket}
 		<Card.Root>
 			<Card.Content class="text-sm text-muted-foreground">
 				<div class="font-medium text-foreground">S3 file manager unavailable</div>
 				<div class="mt-1">
-					Configure <code class="font-mono text-[13px] text-foreground"
-						>connections.s3.config.defaultBucket</code
-					> in config.json and restart.
+					Set <code class="font-mono text-[13px] text-foreground">s3_endpoint</code>,
+					<code class="font-mono text-[13px] text-foreground">s3_bucket</code> and the S3 keys in the
+					server's config.json and restart it.
 				</div>
 			</Card.Content>
 		</Card.Root>
@@ -493,8 +439,7 @@
 											selectObject(object);
 											deleteCandidate = object;
 											deleteConfirmKey = '';
-										}}
-										disabled={!writesAllowed || !canOperate}><Trash2 class="size-3" /></Button
+										}}><Trash2 class="size-3" /></Button
 									>
 								</Table.Cell>
 							</Table.Row>
@@ -541,7 +486,7 @@
 							<Button
 								variant="destructive"
 								onclick={deleteObject}
-								disabled={!writesAllowed || !canOperate || deleteConfirmKey !== deleteCandidate.key}
+								disabled={deleteConfirmKey !== deleteCandidate.key}
 							>
 								<Trash2 class="size-4" /> Delete file
 							</Button>
